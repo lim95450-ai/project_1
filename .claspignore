@@ -1,0 +1,9 @@
+# Apps Script에 업로드하지 않을 파일들
+PRD.md
+README.md
+CHANGELOG.md
+HANDOFF.md
+.clasp.json
+.claspignore
+node_modules/**
+.git/**

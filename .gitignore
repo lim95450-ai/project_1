@@ -1,0 +1,17 @@
+# Vercel Build Outputs
+dist/
+
+# Dependencies
+node_modules/
+
+# Google Apps Script Clasp Config
+.clasp.json
+
+# Local temp and data files
+*.xlsm
+*.xlsx
+*.log
+
+# OS Files
+.DS_Store
+Thumbs.db

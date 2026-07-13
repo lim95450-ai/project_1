@@ -1,0 +1,265 @@
+<script>
+  /**
+   * 공통 JS 유틸리티
+   */
+
+  // 근무표 데이터를 받아 HTML 테이블을 렌더링한다
+  function renderSchedule(data) {
+    if (!data || !data.schedule) {
+      document.getElementById('app').innerHTML =
+        '<div class="error-card">' +
+          '<div class="error-icon">🔍</div>' +
+          '<h2>근무표를 찾을 수 없습니다</h2>' +
+          '<p>잘못된 링크이거나 삭제된 근무표입니다.</p>' +
+          '<p style="font-size:12px; margin-top:10px; color:#475569;">스프레드시트에 생성결과가 존재하는지 확인하세요.</p>' +
+        '</div>';
+      return;
+    }
+
+    var html = '';
+
+    // ── 헤더 카드 ──
+    html += '<div class="header-card">';
+    html += '  <h1>📋 ' + escapeHtml(data.title || '신평119안전센터 소내근무표') + '</h1>';
+    html += '  <div class="date-badge">📅 ' + escapeHtml(data.date || '') + '</div>';
+    html += '</div>';
+
+    // ── 다른 날짜 조회 바 또는 QR 모드 알림 ──
+    if (data.isQrMode) {
+      html += '<div style="background:rgba(16,185,129,0.1);border:1px solid rgba(16,185,129,0.2);border-radius:12px;padding:12px;display:flex;gap:8px;align-items:center;justify-content:center;margin-bottom:16px;color:#34d399;font-size:13px;font-weight:500;">';
+      html += '  <span>💡 QR코드 스캔으로 연동된 근무표입니다.</span>';
+      html += '</div>';
+    } else {
+      html += '<div style="background:rgba(30,41,59,0.4);border:1px solid rgba(148,163,184,0.1);border-radius:12px;padding:12px;display:flex;gap:8px;align-items:center;justify-content:center;margin-bottom:16px;">';
+      html += '  <span style="font-size:13px;color:#94a3b8;white-space:nowrap;">📅 다른 날짜:</span>';
+      html += '  <input type="date" id="view-search-date" value="' + (data.date || '') + '" style="background:#0f172a;border:1px solid rgba(148,163,184,0.3);border-radius:6px;padding:4px 8px;color:#e2e8f0;font-size:13px;outline:none;font-family:inherit;">';
+      html += '  <button onclick="viewSearchByDate()" style="background:linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);color:white;border:none;border-radius:6px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;">조회</button>';
+      html += '</div>';
+      html += '<div id="view-search-msg" style="text-align:center;font-size:12px;color:#ef4444;margin-bottom:12px;min-height:18px;margin-top:-8px;"></div>';
+    }
+
+    // ── 통계 요약 그리드 (또는 하위 호환 정보 칩) ──
+    if (data.statsSummary) {
+      html += '<div class="stats-grid">';
+      html += '  <div class="stats-card"><div class="stats-label">총원</div><div class="stats-value">' + data.statsSummary.totalCount + '명</div></div>';
+      html += '  <div class="stats-card"><div class="stats-label">사고자</div><div class="stats-value">' + data.statsSummary.vacationCount + '명</div></div>';
+      html += '  <div class="stats-card"><div class="stats-label">당번</div><div class="stats-value">' + data.statsSummary.onDutyCount + '명</div></div>';
+      html += '  <div class="stats-card"><div class="stats-label">비번</div><div class="stats-value">' + data.statsSummary.offDutyCount + '명</div></div>';
+      html += '</div>';
+    } else {
+      html += '<div class="info-section">';
+      html += '  <div class="info-chip"><div class="label">시간대</div><div class="value">' + data.schedule.length + '개</div></div>';
+      html += '  <div class="info-chip"><div class="label">시간당 인원</div><div class="value">' + (data.requiredPerSlot || '-') + '명</div></div>';
+      html += '  <div class="info-chip"><div class="label">시간 단위</div><div class="value">' + (data.intervalMin || 60) + '분</div></div>';
+      html += '</div>';
+    }
+
+    // ── 사고자 현황 카드 ──
+    if (data.vacationList && data.vacationList.length > 0) {
+      html += '<div class="vacation-card">';
+      html += '  <div class="card-title">🚫 사고자 현황 (' + data.vacationList.length + '명)</div>';
+      for (var v = 0; v < data.vacationList.length; v++) {
+        var vac = data.vacationList[v];
+        var info = '';
+        if (typeof vac === 'object') {
+          var nameWithRank = (vac.rank ? vac.rank + ' ' : '') + vac.name;
+          info = nameWithRank;
+          if (vac.type) {
+            info += ' (' + vac.type;
+            if (vac.period && vac.period !== data.date) {
+              info += ' | ' + vac.period;
+            }
+            if (vac.comment) {
+              info += ' - ' + vac.comment;
+            }
+            info += ')';
+          }
+        } else {
+          info = vac;
+        }
+        html += '<span class="vacation-badge">' + escapeHtml(info) + '</span>';
+      }
+      html += '</div>';
+    }
+
+    // ── 근무표 테이블 ──
+    html += '<div class="schedule-table-wrap">';
+    html += '<table class="schedule-table">';
+    html += '<thead><tr><th>시간</th><th>근무자</th></tr></thead>';
+    html += '<tbody>';
+
+    for (var s = 0; s < data.schedule.length; s++) {
+      var slot = data.schedule[s];
+      var isSpecial = slot.isSpecial || slot.label === '12~14' || slot.label === '00~03';
+      html += '<tr class="' + (isSpecial ? 'special-slot' : '') + '">';
+      html += '<td class="time-cell">' + escapeHtml(slot.label || slot.time) + '</td>';
+      html += '<td><div class="workers-cell">';
+
+      for (var w = 0; w < slot.workers.length; w++) {
+        var worker = slot.workers[w];
+        if (!worker) continue;
+        
+        var name = (typeof worker === 'object' && worker !== null) ? (worker.name || '') : worker;
+        var rank = (typeof worker === 'object' && worker !== null) ? (worker.rank || '') : '';
+        var team = (typeof worker === 'object' && worker !== null) ? (worker.team || '') : '';
+        var isPinned = (typeof worker === 'object' && worker !== null) ? !!worker.isPinned : false;
+        var comment = (typeof worker === 'object' && worker !== null) ? (worker.comment || '') : '';
+
+        var dispName = (rank ? rank + ' ' : '') + name;
+        if (team) {
+          dispName += ' (' + team + ')';
+        }
+
+        if (isPinned) {
+          var pinLabel = '<span class="pin-icon">📌</span>' + escapeHtml(dispName);
+          if (comment) {
+            pinLabel += ' [' + escapeHtml(comment) + ']';
+          }
+          html += '<span class="worker-badge pinned">' + pinLabel + '</span>';
+        } else {
+          html += '<span class="worker-badge normal">' + escapeHtml(dispName) + '</span>';
+        }
+      }
+
+      html += '</div></td>';
+      html += '</tr>';
+    }
+
+    html += '</tbody></table></div>';
+
+    // ── 하단 ──
+    html += '<div class="footer-info">';
+    if (data.createdAt) {
+      html += '생성: ' + escapeHtml(data.createdAt);
+    }
+    html += '</div>';
+
+    document.getElementById('app').innerHTML = html;
+  }
+
+  // HTML 이스케이프 (XSS 방지)
+  function escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  // 다른 날짜 조회 및 실시간 자동 생성 처리
+  function viewSearchByDate() {
+    var dateStr = document.getElementById('view-search-date').value;
+    var msgEl = document.getElementById('view-search-msg');
+    if (!dateStr) {
+      msgEl.innerText = '날짜를 선택해 주세요.';
+      msgEl.style.color = '#ef4444';
+      return;
+    }
+    msgEl.innerText = '조회 중...';
+    msgEl.style.color = '#94a3b8';
+    
+    callGasApi('getLatestSidByDate', { date: dateStr }, function(sid) {
+      if (sid) {
+        msgEl.innerText = '근무표를 찾았습니다. 이동합니다...';
+        msgEl.style.color = '#10b981';
+        
+        if (window.GAS_WEBAPP_URL && window.GAS_WEBAPP_URL.trim() !== '') {
+          window.location.href = window.location.origin + '/view.html?sid=' + sid;
+        } else {
+          callGasApi('getWebAppUrl', null, function(url) {
+            window.location.href = url + '?=' + sid;
+          }, function(err) {
+            msgEl.innerText = 'URL 로드 실패: ' + err.message;
+            msgEl.style.color = '#ef4444';
+          });
+        }
+      } else {
+        msgEl.innerText = '해당 날짜의 근무표가 생성되지 않았습니다.';
+        msgEl.style.color = '#ef4444';
+      }
+    }, function(err) {
+      msgEl.innerText = '오류: ' + err.message;
+      msgEl.style.color = '#ef4444';
+    });
+  }
+
+  /**
+   * 구글 앱스 스크립트와 통신하는 하이브리드 API 헬퍼
+   */
+  function callGasApi(action, params, successCallback, failureCallback) {
+    if (window.GAS_WEBAPP_URL && window.GAS_WEBAPP_URL.trim() !== '') {
+      var url = window.GAS_WEBAPP_URL;
+      var isPost = ['setupSheets', 'seedSampleData', 'generateSchedule', 'updateWorkerRank'].indexOf(action) !== -1;
+      
+      var options = {
+        method: isPost ? 'POST' : 'GET',
+        headers: {
+          'Content-Type': 'text/plain;charset=utf-8'
+        }
+      };
+
+      var queryParams = '?action=' + encodeURIComponent(action);
+      
+      if (isPost) {
+        var payload = Object.assign({ action: action }, params);
+        options.body = JSON.stringify(payload);
+      } else {
+        if (params) {
+          for (var key in params) {
+            queryParams += '&' + encodeURIComponent(key) + '=' + encodeURIComponent(params[key]);
+          }
+        }
+      }
+
+      fetch(url + queryParams, options)
+        .then(function(res) {
+          if (!res.ok) throw new Error('HTTP status ' + res.status);
+          return res.json();
+        })
+        .then(function(data) {
+          if (data && data.error) {
+            if (failureCallback) failureCallback(new Error(data.error));
+          } else {
+            if (successCallback) successCallback(data);
+          }
+        })
+        .catch(function(err) {
+          if (failureCallback) failureCallback(err);
+          else console.error('API Error:', err);
+        });
+    }
+    else if (typeof google !== 'undefined' && google.script && google.script.run) {
+      var runner = google.script.run;
+      if (successCallback) {
+        runner = runner.withSuccessHandler(successCallback);
+      }
+      if (failureCallback) {
+        runner = runner.withFailureHandler(failureCallback);
+      }
+      
+      if (typeof runner[action] === 'function') {
+        if (action === 'updateWorkerRank') {
+          runner.updateWorkerRank(params.seq, params.rank);
+        } else if (action === 'generateSchedule') {
+          runner.generateSchedule(params.date);
+        } else if (action === 'getLatestSidByDate') {
+          runner.getLatestSidByDate(params.date);
+        } else if (action === 'getScheduleBySid') {
+          runner.getScheduleBySid(params.sid);
+        } else if (action === 'getScheduleByD') {
+          runner.decodeQrData(params.d);
+        } else {
+          runner[action](params);
+        }
+      } else {
+        if (failureCallback) failureCallback(new Error('Function ' + action + ' not found in google.script.run'));
+      }
+    } else {
+      var errMsg = 'API 연결 오류: GAS_WEBAPP_URL이 설정되지 않았으며, google.script.run 환경이 아닙니다.';
+      if (failureCallback) failureCallback(new Error(errMsg));
+      else console.error(errMsg);
+    }
+  }
+</script>

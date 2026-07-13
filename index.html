@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <?!= include('style') ?>
+</head>
+<body>
+  <div class="container">
+    <div class="header-card">
+      <h1>📋 근무표 QR 공유</h1>
+      <div class="subtitle">Google Sheets + Apps Script 기반</div>
+    </div>
+    <div style="background:rgba(30,41,59,0.6);border:1px solid rgba(148,163,184,0.1);border-radius:16px;padding:24px;text-align:center;margin-bottom:16px;">
+      <h2 style="font-size:18px;color:#f1f5f9;margin-bottom:16px;">📅 근무표 조회</h2>
+      <p style="color:#94a3b8;font-size:13px;margin-bottom:16px;">
+        조회할 근무 날짜를 선택해 주세요.
+      </p>
+      
+      <div style="display:flex;gap:8px;justify-content:center;margin-bottom:16px;">
+        <input type="date" id="search-date" style="background:rgba(15,23,42,0.6);border:1px solid rgba(148,163,184,0.3);border-radius:8px;padding:10px 14px;color:#e2e8f0;font-size:15px;outline:none;font-family:inherit;">
+        <button onclick="searchByDate()" style="background:linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);color:white;border:none;border-radius:8px;padding:0 20px;font-weight:600;cursor:pointer;transition:transform 0.2s;box-shadow:0 4px 12px rgba(59,130,246,0.3);">
+          조회
+        </button>
+      </div>
+      <div id="search-msg" style="font-size:13px;color:#ef4444;min-height:20px;"></div>
+    </div>
+
+    <div style="text-align:center;">
+      <a href="?mode=admin" style="display:inline-block;color:#64748b;font-size:13px;text-decoration:underline;">⚙️ 관리자 모드로 이동</a>
+    </div>
+  </div>
+
+  <script>
+    // 날짜 기본값을 오늘로 설정
+    window.onload = function() {
+      var today = new Date();
+      var yyyy = today.getFullYear();
+      var mm = String(today.getMonth() + 1).padStart(2, '0');
+      var dd = String(today.getDate()).padStart(2, '0');
+      document.getElementById('search-date').value = yyyy + '-' + mm + '-' + dd;
+    };
+
+    function searchByDate() {
+      var dateStr = document.getElementById('search-date').value;
+      var msgEl = document.getElementById('search-msg');
+      if (!dateStr) {
+        msgEl.innerText = '날짜를 선택해 주세요.';
+        msgEl.style.color = '#ef4444';
+        return;
+      }
+
+      msgEl.innerText = '조회 중...';
+      msgEl.style.color = '#94a3b8';
+
+      callGasApi('getLatestSidByDate', { date: dateStr }, function(sid) {
+        if (sid) {
+          msgEl.innerText = '근무표를 찾았습니다. 이동합니다...';
+          msgEl.style.color = '#10b981';
+          
+          if (window.GAS_WEBAPP_URL && window.GAS_WEBAPP_URL.trim() !== '') {
+            window.location.href = window.location.origin + '/view.html?sid=' + sid;
+          } else {
+            callGasApi('getWebAppUrl', null, function(url) {
+              window.location.href = url + '?=' + sid;
+            }, function(err) {
+              msgEl.innerText = 'URL 로드 실패: ' + err.message;
+              msgEl.style.color = '#ef4444';
+            });
+          }
+          
+        } else {
+          msgEl.innerText = '해당 날짜의 근무표가 생성되지 않았습니다.';
+          msgEl.style.color = '#ef4444';
+        }
+      }, function(err) {
+        msgEl.innerText = '오류 발생: ' + err.message;
+        msgEl.style.color = '#ef4444';
+      });
+    }
+  </script>
+  <?!= include('script') ?>
+</body>
+</html>

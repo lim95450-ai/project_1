@@ -1,0 +1,514 @@
+<style>
+  /* ── 리셋 & 기본 ──────────────────────────────────── */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Apple SD Gothic Neo', 'Noto Sans KR', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+    color: #e2e8f0;
+    min-height: 100vh;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── 컨테이너 ─────────────────────────────────────── */
+  .container {
+    max-width: 520px;
+    margin: 0 auto;
+    padding: 16px;
+  }
+
+  /* ── 헤더 카드 ─────────────────────────────────────── */
+  .header-card {
+    background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
+    border-radius: 16px;
+    padding: 24px;
+    margin-bottom: 16px;
+    text-align: center;
+    box-shadow: 0 8px 32px rgba(59, 130, 246, 0.3);
+    position: relative;
+    overflow: hidden;
+  }
+  .header-card::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    right: -50%;
+    width: 100%;
+    height: 100%;
+    background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 60%);
+  }
+  .header-card h1 {
+    font-size: 22px;
+    font-weight: 700;
+    color: #ffffff;
+    margin-bottom: 4px;
+    position: relative;
+  }
+  .header-card .subtitle {
+    font-size: 14px;
+    color: rgba(255,255,255,0.8);
+    position: relative;
+  }
+  .header-card .date-badge {
+    display: inline-block;
+    margin-top: 10px;
+    padding: 4px 14px;
+    background: rgba(255,255,255,0.2);
+    border-radius: 20px;
+    font-size: 13px;
+    color: #fff;
+    backdrop-filter: blur(4px);
+    position: relative;
+  }
+
+  /* ── 정보 배지 영역 ───────────────────────────────── */
+  .info-section {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+  .info-chip {
+    flex: 1;
+    min-width: 100px;
+    padding: 12px;
+    background: rgba(30, 41, 59, 0.8);
+    border: 1px solid rgba(148, 163, 184, 0.15);
+    border-radius: 12px;
+    text-align: center;
+    backdrop-filter: blur(8px);
+  }
+  .info-chip .label {
+    font-size: 11px;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .info-chip .value {
+    font-size: 16px;
+    font-weight: 700;
+    color: #f1f5f9;
+    margin-top: 2px;
+  }
+
+  /* ── 휴가자 카드 ──────────────────────────────────── */
+  .vacation-card {
+    background: rgba(127, 29, 29, 0.3);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-bottom: 16px;
+  }
+  .vacation-card .card-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: #fca5a5;
+    margin-bottom: 8px;
+  }
+  .vacation-badge {
+    display: inline-block;
+    padding: 4px 12px;
+    margin: 3px 4px 3px 0;
+    background: rgba(239, 68, 68, 0.2);
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    border-radius: 20px;
+    font-size: 13px;
+    color: #fca5a5;
+  }
+
+  /* ── 근무표 테이블 ───────────────────────────────── */
+  .schedule-table-wrap {
+    background: rgba(30, 41, 59, 0.6);
+    border: 1px solid rgba(148, 163, 184, 0.1);
+    border-radius: 16px;
+    overflow: hidden;
+    backdrop-filter: blur(8px);
+    box-shadow: 0 4px 24px rgba(0,0,0,0.2);
+  }
+  .schedule-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  .schedule-table thead th {
+    padding: 14px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #94a3b8;
+    background: rgba(15, 23, 42, 0.6);
+    border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+    text-align: center;
+  }
+  .schedule-table tbody tr {
+    transition: background 0.2s ease;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.06);
+  }
+  .schedule-table tbody tr:hover {
+    background: rgba(59, 130, 246, 0.08);
+  }
+  .schedule-table tbody tr:last-child {
+    border-bottom: none;
+  }
+  .schedule-table td {
+    padding: 12px;
+  }
+  .time-cell {
+    text-align: center;
+    font-weight: 700;
+    font-size: 15px;
+    color: #e2e8f0;
+    white-space: nowrap;
+    width: 80px;
+    font-variant-numeric: tabular-nums;
+  }
+  .workers-cell {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  /* ── 근무자 배지 ─────────────────────────────────── */
+  .worker-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 5px 12px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 500;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  .worker-badge:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  }
+  .worker-badge.normal {
+    background: rgba(34, 197, 94, 0.15);
+    border: 1px solid rgba(34, 197, 94, 0.3);
+    color: #86efac;
+  }
+  .worker-badge.pinned {
+    background: rgba(59, 130, 246, 0.2);
+    border: 1px solid rgba(59, 130, 246, 0.4);
+    color: #93c5fd;
+  }
+  .worker-badge .pin-icon {
+    margin-right: 4px;
+    font-size: 11px;
+  }
+
+  /* ── 하단 정보 ───────────────────────────────────── */
+  .footer-info {
+    text-align: center;
+    padding: 20px 0;
+    font-size: 11px;
+    color: #475569;
+  }
+
+  /* ── 오류 화면 ───────────────────────────────────── */
+  .error-card {
+    text-align: center;
+    padding: 60px 24px;
+    background: rgba(30, 41, 59, 0.6);
+    border: 1px solid rgba(148, 163, 184, 0.1);
+    border-radius: 16px;
+    margin-top: 40px;
+  }
+  .error-card .error-icon {
+    font-size: 48px;
+    margin-bottom: 16px;
+  }
+  .error-card h2 {
+    font-size: 20px;
+    color: #f1f5f9;
+    margin-bottom: 8px;
+  }
+  .error-card p {
+    color: #94a3b8;
+    font-size: 14px;
+  }
+
+  /* ── 로딩 애니메이션 ─────────────────────────────── */
+  .loading {
+    text-align: center;
+    padding: 60px 0;
+  }
+  .loading .spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid rgba(59, 130, 246, 0.2);
+    border-top-color: #3b82f6;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin: 0 auto 16px;
+  }
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+
+  /* ── 행 번호 (짝수 행 구분) ──────────────────────── */
+  .schedule-table tbody tr:nth-child(even) {
+    background: rgba(15, 23, 42, 0.3);
+  }
+
+  /* 특별 시간대 (12~14, 00~03) 강조 */
+  .schedule-table tbody tr.special-slot {
+    background: rgba(245, 158, 11, 0.12) !important;
+    border-left: 4px solid #f59e0b;
+  }
+  .schedule-table tbody tr.special-slot td.time-cell {
+    color: #fbbf24;
+    font-weight: 700;
+    padding-left: 12px; /* border-left 보정 */
+  }
+  .schedule-table tbody tr.special-slot .worker-badge.normal {
+    background: rgba(245, 158, 11, 0.2);
+    color: #fbbf24;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+  }
+
+  /* ── 관리자 페이지 추가 CSS ───────────────────────── */
+  .admin-card {
+    background: rgba(30, 41, 59, 0.6);
+    border: 1px solid rgba(148, 163, 184, 0.15);
+    border-radius: 16px;
+    padding: 20px;
+    margin-bottom: 16px;
+    backdrop-filter: blur(8px);
+    box-shadow: 0 4px 24px rgba(0,0,0,0.15);
+  }
+  .admin-card h2 {
+    font-size: 16px;
+    font-weight: 600;
+    color: #f1f5f9;
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  
+  /* 버튼 스타일 */
+  .btn-group {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .btn {
+    flex: 1;
+    min-width: 120px;
+    padding: 12px 16px;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    color: #ffffff;
+  }
+  .btn-primary {
+    background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
+  }
+  .btn-primary:hover {
+    background: linear-gradient(135deg, #2563eb 0%, #1e40af 100%);
+    transform: translateY(-1px);
+  }
+  .btn-success {
+    background: linear-gradient(135deg, #10b981 0%, #047857 100%);
+    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+  }
+  .btn-success:hover {
+    background: linear-gradient(135deg, #059669 0%, #065f46 100%);
+    transform: translateY(-1px);
+  }
+  .btn-warning {
+    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+    box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
+  }
+  .btn-warning:hover {
+    background: linear-gradient(135deg, #d97706 0%, #b45309 100%);
+    transform: translateY(-1px);
+  }
+  .btn-secondary {
+    background: rgba(71, 85, 105, 0.6);
+    border: 1px solid rgba(148, 163, 184, 0.2);
+  }
+  .btn-secondary:hover {
+    background: rgba(71, 85, 105, 0.8);
+    transform: translateY(-1px);
+  }
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none !important;
+    box-shadow: none !important;
+  }
+
+  /* 콘솔 로그 창 */
+  .console-panel {
+    background: #090d16;
+    border: 1px solid #1e293b;
+    border-radius: 12px;
+    padding: 14px;
+    font-family: 'Fira Code', 'Courier New', Courier, monospace;
+    font-size: 12px;
+    height: 180px;
+    overflow-y: auto;
+    margin-top: 8px;
+    box-shadow: inset 0 2px 8px rgba(0,0,0,0.8);
+  }
+  .console-line {
+    margin-bottom: 4px;
+    line-height: 1.4;
+    white-space: pre-wrap;
+  }
+  .console-line.info { color: #3b82f6; }
+  .console-line.success { color: #10b981; }
+  .console-line.warn { color: #f59e0b; }
+  .console-line.error { color: #ef4444; }
+  .console-line.system { color: #94a3b8; }
+
+  /* 공유 결과 영역 */
+  .result-share-box {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    margin-top: 10px;
+  }
+  .input-copy-group {
+    display: flex;
+    width: 100%;
+    gap: 8px;
+  }
+  .url-input {
+    flex: 1;
+    background: rgba(15, 23, 42, 0.6);
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 8px;
+    padding: 10px 12px;
+    color: #e2e8f0;
+    font-size: 13px;
+    outline: none;
+    font-family: monospace;
+  }
+  .url-input:focus {
+    border-color: #3b82f6;
+  }
+  .qr-container {
+    background: #ffffff;
+    padding: 12px;
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+    display: inline-block;
+    transition: transform 0.3s ease;
+  }
+  .qr-container:hover {
+    transform: scale(1.02);
+  }
+  .qr-container img {
+    display: block;
+  }
+  
+  /* 페이드 인 애니메이션 */
+  .fade-in {
+    animation: fadeIn 0.4s ease forwards;
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* 계급 누락 경고 패널 */
+  .warning-banner {
+    background: rgba(220, 38, 38, 0.15);
+    border: 1px solid rgba(220, 38, 38, 0.4);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+    backdrop-filter: blur(8px);
+  }
+  .warning-banner h3 {
+    font-size: 14px;
+    color: #fca5a5;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+  }
+  .warning-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .warning-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: rgba(15, 23, 42, 0.4);
+    border: 1px solid rgba(220, 38, 38, 0.2);
+    border-radius: 8px;
+  }
+  .warning-name {
+    font-size: 13px;
+    font-weight: 500;
+    color: #e2e8f0;
+  }
+  .warning-select-group {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+  .warning-select {
+    background: #0f172a;
+    border: 1px solid rgba(148, 163, 184, 0.3);
+    border-radius: 6px;
+    padding: 4px 8px;
+    color: #e2e8f0;
+    font-size: 12px;
+    outline: none;
+    font-family: inherit;
+  }
+  .btn-mini {
+    padding: 4px 10px;
+    font-size: 11px;
+    border-radius: 6px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  /* 통계 그리드 */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .stats-card {
+    background: rgba(30, 41, 59, 0.6);
+    border: 1px solid rgba(148, 163, 184, 0.15);
+    border-radius: 12px;
+    padding: 10px;
+    text-align: center;
+    backdrop-filter: blur(8px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  }
+  .stats-card .stats-label {
+    font-size: 11px;
+    color: #94a3b8;
+    margin-bottom: 4px;
+    font-weight: 500;
+  }
+  .stats-card .stats-value {
+    font-size: 18px;
+    font-weight: 700;
+    color: #f1f5f9;
+  }
+</style>

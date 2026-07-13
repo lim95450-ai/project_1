@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>근무표 관리자</title>
+  <?!= include('style') ?>
+</head>
+<body>
+  <div class="container">
+    <!-- 상단 헤더 -->
+    <div class="header-card">
+      <h1>⚙️ 근무표 관리자 시스템</h1>
+      <div class="subtitle">구글 스프레드시트 연동형 근무 관리</div>
+      <a href="https://docs.google.com/spreadsheets/d/1kNhqHfrLQxwyONuahpdaz934LLjWxMIixbc2ws-2A0E/edit" target="_blank" class="date-badge" style="text-decoration: none; display: inline-flex; align-items: center; gap: 4px; margin-top: 12px; font-weight: 500;">
+        🟢 구글 시트 바로가기 ↗
+      </a>
+    </div>
+
+    <!-- 계급 누락 경고 패널 (기본 숨김) -->
+    <div class="warning-banner fade-in" id="warning-panel" style="display: none;">
+      <h3>⚠️ 계급 정보 누락 경고</h3>
+      <p style="font-size: 12px; color: #94a3b8; margin-bottom: 12px; line-height: 1.4;">
+        계급이 입력되지 않은 근무자가 있습니다. 아래에서 계급을 선택하고 [등록]을 눌러 시트에 반영하거나, 구글 시트에서 직접 수정해 주세요.
+      </p>
+      <div class="warning-list" id="warning-list">
+        <!-- 누락자 목록이 동적으로 들어감 -->
+      </div>
+    </div>
+
+    <!-- 카드 1: 데이터 관리 -->
+    <div class="admin-card">
+      <h2>📊 데이터 관리</h2>
+      <p style="font-size: 13px; color: #94a3b8; margin-bottom: 12px; line-height: 1.4;">
+        시트를 생성하거나 샘플 데이터를 넣어 테스트할 수 있습니다. 이미 데이터가 있으면 건너뜁니다.
+      </p>
+      <div class="btn-group">
+        <button id="btn-setup" class="btn btn-secondary" onclick="actionSetup()">
+          📁 시트 초기화
+        </button>
+        <button id="btn-seed" class="btn btn-secondary" onclick="actionSeed()">
+          📝 샘플 입력
+        </button>
+      </div>
+    </div>
+
+    <!-- 카드 2: 근무표 배정 -->
+    <div class="admin-card">
+      <h2>📅 근무표 자동 배정</h2>
+      <p style="font-size: 13px; color: #94a3b8; margin-bottom: 12px; line-height: 1.4;">
+        지정한 날짜의 근무표를 생성합니다. (휴가자 및 말뚝근무 자동 연동)
+      </p>
+      <div class="input-copy-group" style="margin-bottom: 12px; align-items: center;">
+        <label for="generate-date" style="font-size: 13px; color: #94a3b8; min-width: 70px;">대상 날짜:</label>
+        <input type="date" id="generate-date" class="url-input" style="font-family: inherit;">
+      </div>
+      <div class="btn-group">
+        <button id="btn-generate" class="btn btn-primary" style="width: 100%;" onclick="actionGenerate()">
+          ⚡ 근무표 생성
+        </button>
+      </div>
+    </div>
+
+    <!-- 카드 3: 실행 로그 콘솔 -->
+    <div class="admin-card">
+      <h2>🖥️ 시스템 실행 로그</h2>
+      <div class="console-panel" id="console-panel">
+        <!-- 로그 라인들이 여기에 추가됨 -->
+      </div>
+    </div>
+
+    <!-- 카드 4: 생성 결과 및 QR 공유 (기본 숨김) -->
+    <div class="admin-card fade-in" id="result-card" style="display: none;">
+      <h2>🎉 근무표 배포 완료</h2>
+      <p style="font-size: 13px; color: #94a3b8; margin-bottom: 16px; text-align: center;" id="result-info-text">
+        근무표가 성공적으로 생성되었습니다. 아래 QR이나 링크를 사용하여 공유하세요.
+      </p>
+      
+      <div class="result-share-box">
+        <!-- QR 코드 컨테이너 -->
+        <div class="qr-container" id="qr-code">
+          <!-- qrcode.js가 생성하는 이미지가 들어갈 공간 -->
+        </div>
+        
+        <!-- 링크 입력 및 복사 -->
+        <div class="input-copy-group">
+          <input type="text" id="share-url-input" class="url-input" readonly onclick="this.select()">
+          <button id="btn-copy" class="btn btn-success" style="min-width: 90px; flex: 0 0 auto;" onclick="actionCopyLink()">
+            📋 복사
+          </button>
+        </div>
+        
+        <div class="btn-group" style="width: 100%;">
+          <a id="link-view" href="#" target="_blank" class="btn btn-primary" style="text-decoration: none; width: 100%;">
+            🌐 바로가기 ↗
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer-info">
+      근무표 자동 배포 관리자 도구 v0.4
+    </div>
+  </div>
+
+  <!-- QR 코드 라이브러리 include -->
+  <?!= include('qr') ?>
+
+  <script>
+    var webAppUrl = ''; // 서버에서 가져올 배포 웹앱 URL
+    var generatedSid = ''; // 생성된 최신 근무표 sid
+
+    // 페이지 로드 시 초기화
+    window.onload = function() {
+      addLog('시스템을 초기화하는 중...', 'system');
+      
+      // 날짜 선택 인풋 기본값을 오늘로 설정
+      var today = new Date();
+      var yyyy = today.getFullYear();
+      var mm = String(today.getMonth() + 1).padStart(2, '0');
+      var dd = String(today.getDate()).padStart(2, '0');
+      document.getElementById('generate-date').value = yyyy + '-' + mm + '-' + dd;
+
+      // 모든 버튼 임시 비활성화
+      setButtonsDisabled(true);
+
+      // 서버로부터 웹앱 URL 가져오기
+      if (window.GAS_WEBAPP_URL && window.GAS_WEBAPP_URL.trim() !== '') {
+        webAppUrl = window.location.origin;
+        addLog('Vercel 호스팅 환경 연동 성공!', 'success');
+        addLog('배포 주소: ' + webAppUrl, 'info');
+        setButtonsDisabled(false);
+        addLog('관리자 시스템이 준비되었습니다.', 'system');
+        checkMissingRanks();
+      } else {
+        callGasApi('getWebAppUrl', null, function(url) {
+          webAppUrl = url;
+          addLog('웹앱 배포 URL 연동 성공!', 'success');
+          addLog('배포 주소: ' + url, 'info');
+          setButtonsDisabled(false);
+          addLog('관리자 시스템이 준비되었습니다.', 'system');
+          checkMissingRanks(); // 계급 누락자 검사
+        }, function(err) {
+          addLog('웹앱 URL 가져오기 실패: ' + err.message, 'error');
+          setButtonsDisabled(false);
+        });
+      }
+    };
+
+    function checkMissingRanks() {
+      callGasApi('getMissingRankWorkers', null, function(missingList) {
+        var panel = document.getElementById('warning-panel');
+        var listContainer = document.getElementById('warning-list');
+        if (!panel || !listContainer) return;
+
+        if (missingList && missingList.length > 0) {
+          panel.style.display = 'block';
+          addLog('⚠️ 계급이 누락된 근무자가 감지되었습니다: ' + missingList.length + '명', 'warn');
+          
+          var html = '';
+          for (var i = 0; i < missingList.length; i++) {
+            var w = missingList[i];
+            html += '<div class="warning-item">';
+            html += '  <span class="warning-name">' + escapeHtml(w.name) + ' (' + escapeHtml(w.team) + ')</span>';
+            html += '  <div class="warning-select-group">';
+            html += '    <select class="warning-select" id="select-rank-' + w.seq + '">';
+            html += '      <option value="">-- 계급 선택 --</option>';
+            html += '      <option value="소방령">소방령</option>';
+            html += '      <option value="소방경">소방경</option>';
+            html += '      <option value="소방위">소방위</option>';
+            html += '      <option value="소방장">소방장</option>';
+            html += '      <option value="소방교">소방교</option>';
+            html += '      <option value="소방사">소방사</option>';
+            html += '    </select>';
+            html += '    <button class="btn btn-success btn-mini" onclick="actionSaveRank(' + w.seq + ', \'' + escapeJs(w.name) + '\')">등록</button>';
+            html += '  </div>';
+            html += '</div>';
+          }
+          listContainer.innerHTML = html;
+        } else {
+          panel.style.display = 'none';
+        }
+      }, function(err) {
+        addLog('계급 누락 확인 오류: ' + err.message, 'error');
+      });
+    }
+
+    // 계급 정보 등록
+    function actionSaveRank(seq, name) {
+      var selectEl = document.getElementById('select-rank-' + seq);
+      if (!selectEl) return;
+      var selectedRank = selectEl.value;
+      if (!selectedRank) {
+        alert('계급을 선택해 주세요.');
+        return;
+      }
+
+      addLog(name + ' 근무자의 계급을 \'' + selectedRank + '\'(으)로 등록 요청 중...', 'info');
+      
+      callGasApi('updateWorkerRank', { seq: seq, rank: selectedRank }, function(success) {
+        if (success) {
+          addLog('✅ ' + name + ' 근무자의 계급 등록 완료!', 'success');
+          checkMissingRanks(); // 목록 갱신
+        } else {
+          addLog('❌ ' + name + ' 계급 등록 실패 (근무자를 찾을 수 없거나 구글 시트 오류)', 'error');
+        }
+      }, function(err) {
+        addLog('계급 등록 중 오류 발생: ' + err.message, 'error');
+      });
+    }
+
+    // JS 문자열 이스케이프 헬퍼
+    function escapeJs(str) {
+      if (!str) return '';
+      return String(str).replace(/'/g, "\\'").replace(/"/g, '\\"');
+    }
+
+    // 로그 출력 헬퍼 함수
+    function addLog(message, type) {
+      var panel = document.getElementById('console-panel');
+      if (!panel) return;
+
+      var now = new Date();
+      var timeStr = '[' + 
+        (now.getHours() < 10 ? '0' : '') + now.getHours() + ':' + 
+        (now.getMinutes() < 10 ? '0' : '') + now.getMinutes() + ':' + 
+        (now.getSeconds() < 10 ? '0' : '') + now.getSeconds() + '] ';
+
+      var line = document.createElement('div');
+      line.className = 'console-line ' + (type || 'info');
+      line.innerText = timeStr + message;
+      panel.appendChild(line);
+
+      // 스크롤 맨 아래로 이동
+      panel.scrollTop = panel.scrollHeight;
+    }
+
+    // 버튼 활성화/비활성화 제어
+    function setButtonsDisabled(disabled) {
+      document.getElementById('btn-setup').disabled = disabled;
+      document.getElementById('btn-seed').disabled = disabled;
+      document.getElementById('btn-generate').disabled = disabled;
+    }
+
+    // 공통 에러 핸들러
+    function handleServerFailure(err, actionName) {
+      addLog('❌ ' + actionName + ' 작업 중 오류가 발생했습니다.', 'error');
+      addLog('오류 메시지: ' + err.message, 'error');
+      setButtonsDisabled(false);
+    }
+
+    // [동작] 시트 초기화
+    function actionSetup() {
+      addLog('시트 초기화를 시작합니다...', 'info');
+      setButtonsDisabled(true);
+      
+      callGasApi('setupSheets', null, function(res) {
+        if (res.created && res.created.length > 0) {
+          addLog('새 시트 생성됨: ' + res.created.join(', '), 'success');
+        }
+        if (res.skipped && res.skipped.length > 0) {
+          addLog('기존 시트 유지(건너뜀): ' + res.skipped.join(', '), 'info');
+        }
+        addLog('✅ 시트 초기화 프로세스 완료!', 'success');
+        setButtonsDisabled(false);
+        checkMissingRanks(); // 목록 갱신
+      }, function(err) {
+        handleServerFailure(err, '시트 초기화');
+      });
+    }
+
+    // [동작] 샘플 데이터 입력
+    function actionSeed() {
+      addLog('테스트 샘플 데이터 입력을 요청합니다...', 'info');
+      setButtonsDisabled(true);
+
+      callGasApi('seedSampleData', null, function(res) {
+        if (!res) {
+          addLog('⚠️ 설정을 읽을 수 없습니다. 시트 초기화를 먼저 진행했는지 확인하세요.', 'warn');
+          setButtonsDisabled(false);
+          return;
+        }
+        if (res.success === false) {
+          addLog('❌ 샘플 데이터 입력 실패: ' + res.error, 'error');
+          setButtonsDisabled(false);
+          return;
+        }
+        if (res.seeded && res.seeded.length > 0) {
+          addLog('샘플 데이터 입력 완료: ' + res.seeded.join(', '), 'success');
+        }
+        if (res.skipped && res.skipped.length > 0) {
+          addLog('데이터가 있는 시트 건너뜀: ' + res.skipped.join(', '), 'info');
+        }
+        addLog('✅ 샘플 데이터 입력 프로세스 완료!', 'success');
+        setButtonsDisabled(false);
+        checkMissingRanks(); // 목록 갱신
+      }, function(err) {
+        handleServerFailure(err, '샘플 데이터 입력');
+      });
+    }
+
+    // [동작] 근무표 생성
+    function actionGenerate() {
+      var selectedDate = document.getElementById('generate-date').value;
+      if (!selectedDate) {
+        alert('근무표를 생성할 날짜를 선택해 주세요.');
+        return;
+      }
+      addLog(selectedDate + ' 일자 자동 근무표 배정을 생성하는 중입니다. 잠시만 기다려 주세요...', 'info');
+      setButtonsDisabled(true);
+      
+      // 기존 결과 카드 숨기기
+      document.getElementById('result-card').style.display = 'none';
+
+      callGasApi('generateSchedule', { date: selectedDate }, function(res) {
+        setButtonsDisabled(false);
+        if (!res) {
+          addLog('⚠️ 근무표 생성에 실패했습니다. 근무 인원이나 설정 시트를 확인하세요.', 'warn');
+          return;
+        }
+        
+        generatedSid = res.sid;
+        addLog('🎉 근무표 생성 완료!', 'success');
+        addLog('  - 일자: ' + res.date, 'info');
+        addLog('  - 배정된 시간대 수: ' + res.schedule.length + '개', 'info');
+        addLog('  - 발급된 고유 SID: ' + res.sid, 'success');
+
+        // Vercel 환경일 경우 공유 링크 포맷을 view.html?sid= 형태로 매핑
+        var shareUrl = '';
+        if (window.GAS_WEBAPP_URL && window.GAS_WEBAPP_URL.trim() !== '') {
+          shareUrl = webAppUrl + '/view.html?sid=' + res.sid;
+        } else {
+          shareUrl = webAppUrl + '?=' + res.sid;
+        }
+        document.getElementById('share-url-input').value = shareUrl;
+        
+        // 바로가기 링크 설정
+        document.getElementById('link-view').href = shareUrl;
+
+        // 설명 텍스트 업데이트
+        document.getElementById('result-info-text').innerHTML = 
+          '<strong>📅 근무 일자: ' + escapeHtml(res.date) + '</strong><br>' +
+          '시간대: ' + res.schedule.length + '개, 배정 인원: ' + res.requiredPerSlot + '명';
+
+        // QR 코드 생성
+        addLog('클라이언트에서 고유 QR 코드를 생성 중...', 'info');
+        generateQrCode('qr-code', shareUrl, 180);
+        addLog('QR 코드 생성 완료!', 'success');
+
+        // 결과 영역 표시
+        var resultCard = document.getElementById('result-card');
+        resultCard.style.display = 'block';
+        
+        // 스크롤을 결과 카드로 이동
+        resultCard.scrollIntoView({ behavior: 'smooth' });
+      }, function(err) {
+        handleServerFailure(err, '근무표 생성');
+      });
+    }
+
+    // [동작] 링크 클립보드 복사
+    function actionCopyLink() {
+      var input = document.getElementById('share-url-input');
+      if (!input || !input.value) return;
+
+      input.select();
+      
+      var copyBtn = document.getElementById('btn-copy');
+      
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(input.value)
+          .then(function() {
+            showCopySuccess(copyBtn);
+          })
+          .catch(function(err) {
+            fallbackCopy(input, copyBtn);
+          });
+      } else {
+        fallbackCopy(input, copyBtn);
+      }
+    }
+
+    // 클립보드 API가 안될 때의 fallback 복사 처리
+    function fallbackCopy(input, copyBtn) {
+      try {
+        var success = document.execCommand('copy');
+        if (success) {
+          showCopySuccess(copyBtn);
+        } else {
+          addLog('링크 복사 실패', 'error');
+        }
+      } catch (err) {
+        addLog('복사 에러: ' + err.message, 'error');
+      }
+    }
+
+    // 복사 성공 UI 표시
+    function showCopySuccess(btn) {
+      addLog('공유 링크가 클립보드에 복사되었습니다.', 'success');
+      var originalText = btn.innerText;
+      btn.innerText = '✔ 완료';
+      btn.style.background = 'linear-gradient(135deg, #059669 0%, #065f46 100%)';
+      
+      setTimeout(function() {
+        btn.innerText = originalText;
+        btn.style.background = '';
+      }, 2000);
+    }
+
+    // HTML escape (XSS 방지용 로컬함수)
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+  </script>
+  <?!= include('script') ?>
+</body>
+</html>

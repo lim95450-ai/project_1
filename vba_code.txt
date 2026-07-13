@@ -1,0 +1,912 @@
+' ==============================================================================
+' 신평119안전센터 소내근무표 자동 배정 및 QR 생성 매크로 (최종 수정본 - nested UDT 대응)
+' ==============================================================================
+' 이 코드를 엑셀의 VBA 모듈(Alt + F11 -> 삽입 -> 모듈)에 붙여넣고 사용하세요.
+' 개발도구 -> 매크로 -> "GenerateSchedule"을 실행하거나 버튼에 연결하세요.
+' ==============================================================================
+
+Option Explicit
+
+' ── 웹앱 URL 설정 (본인의 배포 URL로 변경) ──
+Const WEB_APP_URL As String = "https://script.google.com/macros/s/AKfycbyGiotBkUCWxRtpRxSwp0M_4T2EPsruUs4BUp8yr66AGoA0iA5w9XLPn1fpaSTgyUPS/exec"
+
+' ── 구조체 선언 ──
+Type WorkerInfo
+    Seq As Long
+    Rank As String
+    Name As String
+    Team As String
+    IsAssignedToday As Boolean
+    IsFullVacation As Boolean
+    IsDayExempt As Boolean
+    IsNightExempt As Boolean
+    Count1214 As Long
+    Count0003 As Long
+End Type
+
+Type VacationInfo
+    Name As String
+    Rank As String
+    VacType As String
+    Period As String
+    Comment As String
+    IsDay As Boolean
+    IsNight As Boolean
+    IsFull As Boolean
+End Type
+
+Type PinnedInfo
+    TimeSlot As String
+    Name As String
+    Comment As String
+End Type
+
+Type AssignedWorker
+    Name As String
+    Rank As String
+    Team As String
+    IsPinned As Boolean
+    Comment As String
+End Type
+
+Type TimeSlotInfo
+    TimeStr As String
+    Label As String
+    IsDay As Boolean
+    IsSpecial As Boolean
+    SpecialId As String
+    Workers() As AssignedWorker
+    WorkerCount As Long
+End Type
+
+' ── 메인 배정 프로시저 (버튼과 직접 연결되는 메인 실행문) ──
+Public Sub GenerateSchedule()
+    Dim wsSettings As Worksheet, wsWorkers As Worksheet, wsVacation As Worksheet
+    Dim wsPinned As Worksheet, wsSummary As Worksheet, wsDetail As Worksheet
+    Dim wsViewer As Worksheet
+    
+    Dim tempWorker As AssignedWorker ' 중첩 UDT 대입용 임시 변수
+    
+    On Error GoTo ErrorHandler
+    
+    ' 시트 참조 설정
+    Set wsSettings = ThisWorkbook.Sheets("설정")
+    Set wsWorkers = ThisWorkbook.Sheets("근무자")
+    Set wsVacation = ThisWorkbook.Sheets("휴가")
+    Set wsPinned = ThisWorkbook.Sheets("말뚝근무")
+    Set wsViewer = ThisWorkbook.Sheets("근무표")
+    
+    ' 기록 시트 없을 시 자동 생성
+    Set wsSummary = GetOrCreateSheet("생성기록_요약")
+    Set wsDetail = GetOrCreateSheet("생성기록_상세")
+    
+    ' 1. 설정 정보 읽기
+    Dim targetDate As Date
+    targetDate = wsSettings.Range("B2").Value
+    
+    Dim targetDateStr As String
+    targetDateStr = Format(targetDate, "yyyy-mm-dd")
+    
+    ' 2. 3일 주기 당번팀 계산 (2026-06-25 = 1팀 당번 기준)
+    Dim baseDate As Date
+    baseDate = DateValue("2026-06-25")
+    
+    Dim diffDays As Long
+    diffDays = DateDiff("d", baseDate, targetDate)
+    
+    Dim remTeam As Long
+    remTeam = diffDays Mod 3
+    If remTeam < 0 Then remTeam = remTeam + 3
+    
+    Dim activeTeam As String
+    If remTeam = 0 Then
+        activeTeam = "1팀"
+    ElseIf remTeam = 1 Then
+        activeTeam = "2팀"
+    Else
+        activeTeam = "3팀"
+    End If
+    
+    ' 3. 휴가자 목록 읽기 (해당 날짜에 해당하는 사람만 필터링)
+    Dim vacCount As Long: vacCount = 0
+    Dim vacations() As VacationInfo
+    
+    Dim lastRowVac As Long
+    lastRowVac = wsVacation.Cells(wsVacation.Rows.Count, 1).End(xlUp).Row
+    
+    Dim i As Long
+    For i = 2 To lastRowVac
+        Dim vacDateVal As Variant: vacDateVal = wsVacation.Cells(i, 1).Value
+        Dim vacPeriodVal As String: vacPeriodVal = Trim(wsVacation.Cells(i, 4).Value)
+        
+        If IsDate(vacDateVal) Then
+            Dim isMatch As Boolean
+            isMatch = IsDateInPeriod(targetDate, CDate(vacDateVal), vacPeriodVal)
+            
+            If isMatch Then
+                vacCount = vacCount + 1
+                If vacCount = 1 Then
+                    ReDim vacations(1 To 1)
+                Else
+                    ReDim Preserve vacations(1 To vacCount)
+                End If
+                vacations(vacCount).Name = Trim(wsVacation.Cells(i, 2).Value)
+                vacations(vacCount).VacType = Trim(wsVacation.Cells(i, 3).Value)
+                vacations(vacCount).Period = vacPeriodVal
+                vacations(vacCount).Comment = Trim(wsVacation.Cells(i, 5).Value)
+                
+                ' 계급 찾아주기
+                vacations(vacCount).Rank = FindWorkerRank(wsWorkers, vacations(vacCount).Name)
+                
+                Dim fullText As String
+                fullText = vacations(vacCount).VacType & " " & vacations(vacCount).Comment
+                
+                vacations(vacCount).IsDay = (InStr(fullText, "주간") > 0)
+                vacations(vacCount).IsNight = (InStr(fullText, "야간") > 0)
+                vacations(vacCount).IsFull = (InStr(fullText, "전일") > 0) Or (Not vacations(vacCount).IsDay And Not vacations(vacCount).IsNight)
+            End If
+        End If
+    Next i
+    
+    ' 4. 근무자 후보 추출 (사용여부가 'Y'이고 당번 팀인 인원만)
+    Dim allWorkersCount As Long: allWorkersCount = 0
+    Dim lastRowWork As Long
+    lastRowWork = wsWorkers.Cells(wsWorkers.Rows.Count, 1).End(xlUp).Row
+    
+    For i = 2 To lastRowWork
+        If Trim(wsWorkers.Cells(i, 5).Value) = "Y" Then
+            allWorkersCount = allWorkersCount + 1
+        End If
+    Next i
+    
+    Dim candidates() As WorkerInfo
+    Dim candCount As Long: candCount = 0
+    
+    For i = 2 To lastRowWork
+        Dim wSeq As Long: wSeq = wsWorkers.Cells(i, 1).Value
+        Dim wRank As String: wRank = Trim(wsWorkers.Cells(i, 2).Value)
+        Dim wName As String: wName = Trim(wsWorkers.Cells(i, 3).Value)
+        Dim wTeam As String: wTeam = Trim(wsWorkers.Cells(i, 4).Value)
+        Dim wUse As String: wUse = Trim(wsWorkers.Cells(i, 5).Value)
+        
+        If wUse = "Y" And wTeam = activeTeam Then
+            candCount = candCount + 1
+            If candCount = 1 Then
+                ReDim candidates(1 To 1)
+            Else
+                ReDim Preserve candidates(1 To candCount)
+            End If
+            candidates(candCount).Seq = wSeq
+            candidates(candCount).Rank = wRank
+            candidates(candCount).Name = wName
+            candidates(candCount).Team = wTeam
+            candidates(candCount).IsAssignedToday = False
+            
+            ' 휴가 여부 검사
+            Dim vIdx As Long
+            candidates(candCount).IsFullVacation = False
+            candidates(candCount).IsDayExempt = False
+            candidates(candCount).IsNightExempt = False
+            
+            For vIdx = 1 To vacCount
+                If vacations(vIdx).Name = wName Then
+                    candidates(candCount).IsFullVacation = vacations(vIdx).IsFull
+                    candidates(candCount).IsDayExempt = vacations(vIdx).IsDay
+                    candidates(candCount).IsNightExempt = vacations(vIdx).IsNight
+                    Exit For
+                End If
+            Next vIdx
+            
+            ' 역사적 특수근무(12~14, 00~03) 횟수 계산
+            candidates(candCount).Count1214 = GetHistoryCount(wsDetail, wName, "12~14")
+            candidates(candCount).Count0003 = GetHistoryCount(wsDetail, wName, "00~03")
+        End If
+    Next i
+    
+    If candCount = 0 Then
+        MsgBox "⚠️ 오늘 근무 가능한 당번팀(" & activeTeam & ") 인원이 없습니다.", vbCritical, "배정 실패"
+        Exit Sub
+    End If
+    
+    ' 5. 시간대 정의 (10개 슬롯)
+    Dim slots() As TimeSlotInfo
+    ReDim slots(1 To 10)
+    InitTimeSlots slots
+    
+    ' 6. 말뚝(고정) 근무 목록 읽기 및 선배정
+    Dim lastRowPinned As Long
+    lastRowPinned = wsPinned.Cells(wsPinned.Rows.Count, 1).End(xlUp).Row
+    
+    For i = 2 To lastRowPinned
+        Dim pDateVal As Variant: pDateVal = wsPinned.Cells(i, 1).Value
+        If IsDate(pDateVal) Then
+            If Format(CDate(pDateVal), "yyyy-mm-dd") = targetDateStr Then
+                Dim pTime As String: pTime = Trim(wsPinned.Cells(i, 2).Value)
+                Dim pName As String: pName = Trim(wsPinned.Cells(i, 3).Value)
+                Dim pComment As String: pComment = Trim(wsPinned.Cells(i, 4).Value)
+                
+                ' 해당 시간대 슬롯 찾아서 배정
+                Dim sIdx As Long
+                For sIdx = 1 To 10
+                    If slots(sIdx).Label = pTime Or slots(sIdx).TimeStr = pTime Then
+                        ' 후보자 중에서 당일 배정 여부 세팅
+                        Dim cIdx As Long
+                        For cIdx = 1 To candCount
+                            If candidates(cIdx).Name = pName Then
+                                candidates(cIdx).IsAssignedToday = True
+                                Exit For
+                            End If
+                        Next cIdx
+                        
+                        ' 슬롯에 근무자 추가
+                        slots(sIdx).WorkerCount = slots(sIdx).WorkerCount + 1
+                        If slots(sIdx).WorkerCount = 1 Then
+                            ReDim slots(sIdx).Workers(1 To 1)
+                        Else
+                            ReDim Preserve slots(sIdx).Workers(1 To slots(sIdx).WorkerCount)
+                        End If
+                        
+                        ' 임시 변수를 사용해 중첩 구조체 대입 (VBA 컴파일러 버그 우회)
+                        tempWorker.Name = pName
+                        tempWorker.Rank = FindWorkerRank(wsWorkers, pName)
+                        tempWorker.Team = FindWorkerTeam(wsWorkers, pName)
+                        tempWorker.IsPinned = True
+                        tempWorker.Comment = pComment
+                        
+                        slots(sIdx).Workers(slots(sIdx).WorkerCount) = tempWorker
+                    End If
+                Next sIdx
+            End If
+        End If
+    Next i
+    
+    ' 7. 특수 시간대 배정 (12~14, 00~03)
+    ' 특수근무 적게 선 선호자로 정렬 후 배정
+    For sIdx = 1 To 10
+        If slots(sIdx).IsSpecial Then
+            Dim needed As Long
+            needed = 1 - slots(sIdx).WorkerCount ' 시간당 1명 기준
+            
+            If needed > 0 Then
+                ' 배정 가능한 후보 리스트업 및 정렬
+                Dim availCount As Long: availCount = 0
+                Dim availIndices() As Long
+                
+                For cIdx = 1 To candCount
+                    Dim w As WorkerInfo: w = candidates(cIdx)
+                    Dim canAssign As Boolean: canAssign = True
+                    
+                    If w.IsAssignedToday Or w.IsFullVacation Then canAssign = False
+                    If slots(sIdx).IsDay And w.IsDayExempt Then canAssign = False
+                    If (Not slots(sIdx).IsDay) And w.IsNightExempt Then canAssign = False
+                    
+                    If canAssign Then
+                        availCount = availCount + 1
+                        If availCount = 1 Then
+                            ReDim availIndices(1 To 1)
+                        Else
+                            ReDim Preserve availIndices(1 To availCount)
+                        End If
+                        availIndices(availCount) = cIdx
+                    End If
+                Next cIdx
+                
+                If availCount > 0 Then
+                    ' 특수근무 카운트(Count1214 or Count0003) 오름차순, 순번(Seq) 오름차순 정렬
+                    SortAvailableCandidates candidates, availIndices, slots(sIdx).SpecialId
+                    
+                    ' 정렬된 첫 번째 인원 배정
+                    Dim pickedIdx As Long: pickedIdx = availIndices(1)
+                    candidates(pickedIdx).IsAssignedToday = True
+                    
+                    slots(sIdx).WorkerCount = slots(sIdx).WorkerCount + 1
+                    If slots(sIdx).WorkerCount = 1 Then
+                        ReDim slots(sIdx).Workers(1 To 1)
+                    Else
+                        ReDim Preserve slots(sIdx).Workers(1 To slots(sIdx).WorkerCount)
+                    End If
+                    
+                    ' 임시 변수를 사용해 중첩 구조체 대입 (VBA 컴파일러 버그 우회)
+                    tempWorker.Name = candidates(pickedIdx).Name
+                    tempWorker.Rank = candidates(pickedIdx).Rank
+                    tempWorker.Team = candidates(pickedIdx).Team
+                    tempWorker.IsPinned = False
+                    tempWorker.Comment = ""
+                    
+                    slots(sIdx).Workers(slots(sIdx).WorkerCount) = tempWorker
+                End If
+            End If
+        End If
+    Next sIdx
+    
+    ' 8. 일반 시간대 배정 (Sliding Window 방식)
+    ' 지난 배정의 마지막 배정자 다음 위치(vBaseIdx) 찾기
+    Dim lastBaseName As String
+    lastBaseName = GetLastVirtualBaseNameForTeam(wsSummary, activeTeam)
+    
+    Dim vBaseIdx As Long: vBaseIdx = 1
+    If lastBaseName <> "" Then
+        For cIdx = 1 To candCount
+            If candidates(cIdx).Name = lastBaseName Then
+                vBaseIdx = cIdx
+                Exit For
+            End If
+        Next cIdx
+    End If
+    
+    Dim candidateIdx As Long: candidateIdx = vBaseIdx
+    
+    For sIdx = 1 To 10
+        If Not slots(sIdx).IsSpecial Then
+            needed = 1 - slots(sIdx).WorkerCount
+            Dim tried As Long: tried = 0
+            
+            While needed > 0 And tried < candCount
+                Dim currIdx As Long
+                currIdx = ((candidateIdx - 1) Mod candCount) + 1
+                candidateIdx = candidateIdx + 1
+                tried = tried + 1
+                
+                Dim cw As WorkerInfo: cw = candidates(currIdx)
+                Dim canAssignReg As Boolean: canAssignReg = True
+                
+                If cw.IsAssignedToday Or cw.IsFullVacation Then canAssignReg = False
+                If slots(sIdx).IsDay And cw.IsDayExempt Then canAssignReg = False
+                If (Not slots(sIdx).IsDay) And cw.IsNightExempt Then canAssignReg = False
+                
+                If canAssignReg Then
+                    candidates(currIdx).IsAssignedToday = True
+                    
+                    slots(sIdx).WorkerCount = slots(sIdx).WorkerCount + 1
+                    If slots(sIdx).WorkerCount = 1 Then
+                        ReDim slots(sIdx).Workers(1 To 1)
+                    Else
+                        ReDim Preserve slots(sIdx).Workers(1 To slots(sIdx).WorkerCount)
+                    End If
+                    
+                    ' 임시 변수를 사용해 중첩 구조체 대입 (VBA 컴파일러 버그 우회)
+                    tempWorker.Name = cw.Name
+                    tempWorker.Rank = cw.Rank
+                    tempWorker.Team = cw.Team
+                    tempWorker.IsPinned = False
+                    tempWorker.Comment = ""
+                    
+                    slots(sIdx).Workers(slots(sIdx).WorkerCount) = tempWorker
+                    
+                    needed = needed - 1
+                    tried = 0 ' 배정 성공 시 시도 횟수 초기화
+                End If
+            Wend
+        End If
+    Next sIdx
+    
+    ' 다음 차례 시작을 위한 가상 기준자 결정
+    Dim nextBaseIdx As Long
+    nextBaseIdx = (vBaseIdx Mod candCount) + 1
+    Dim nextVirtualBaseName As String
+    nextVirtualBaseName = candidates(nextBaseIdx).Name
+    
+    ' 9. 통계 계산
+    Dim totalCount As Long: totalCount = allWorkersCount
+    Dim vacationCount As Long: vacationCount = vacCount
+    
+    ' 당번 소속 근무자 중 오늘 휴가(사고)가 아닌 전체 인원을 당번 수에 집계
+    Dim onDutyCount As Long: onDutyCount = 0
+    For cIdx = 1 To candCount
+        If Not candidates(cIdx).IsFullVacation Then
+            onDutyCount = onDutyCount + 1
+        End If
+    Next cIdx
+    
+    Dim offDutyCount As Long: offDutyCount = totalCount - vacationCount - onDutyCount
+    If offDutyCount < 0 Then offDutyCount = 0
+    
+    ' 10. QR 데이터 압축 생성
+    Dim qrData As String
+    qrData = BuildCompressedQrData(targetDateStr, activeTeam, totalCount, vacationCount, onDutyCount, offDutyCount, vacationCount, vacations, slots)
+    
+    ' 11. 생성 결과 시트 기록 (생성기록_요약, 생성기록_상세)
+    WriteHistory wsSummary, wsDetail, targetDateStr, activeTeam, nextVirtualBaseName, totalCount, vacationCount, onDutyCount, offDutyCount, qrData, slots
+    
+    ' 12. 근무표 시트 그리기 및 QR코드 로드
+    RenderViewerSheet wsViewer, targetDateStr, activeTeam, totalCount, vacationCount, onDutyCount, offDutyCount, vacations, slots, qrData
+    
+    MsgBox "🎉 오늘 근무표가 성공적으로 생성되었습니다!" & vbCrLf & "근무팀: " & activeTeam & " 당번", vbInformation, "완료"
+    Exit Sub
+
+ErrorHandler:
+    MsgBox "❌ 근무표 생성 중 에러가 발생했습니다: " & Err.Description, vbCritical, "오류"
+End Sub
+
+' ── 시간대 슬롯 초기화 (Private 선언) ──
+Private Sub InitTimeSlots(ByRef slots() As TimeSlotInfo)
+    ' 09~12
+    slots(1).TimeStr = "09:00": slots(1).Label = "09~12": slots(1).IsDay = True: slots(1).IsSpecial = False: slots(1).WorkerCount = 0
+    ' 12~14 (Special)
+    slots(2).TimeStr = "12:00": slots(2).Label = "12~14": slots(2).IsDay = True: slots(2).IsSpecial = True: slots(2).SpecialId = "1214": slots(2).WorkerCount = 0
+    ' 14~16
+    slots(3).TimeStr = "14:00": slots(3).Label = "14~16": slots(3).IsDay = True: slots(3).IsSpecial = False: slots(3).WorkerCount = 0
+    ' 16~18
+    slots(4).TimeStr = "16:00": slots(4).Label = "16~18": slots(4).IsDay = True: slots(4).IsSpecial = False: slots(4).WorkerCount = 0
+    ' 18~20
+    slots(5).TimeStr = "18:00": slots(5).Label = "18~20": slots(5).IsDay = False: slots(5).IsSpecial = False: slots(5).WorkerCount = 0
+    ' 20~22
+    slots(6).TimeStr = "20:00": slots(6).Label = "20~22": slots(6).IsDay = False: slots(6).IsSpecial = False: slots(6).WorkerCount = 0
+    ' 22~00
+    slots(7).TimeStr = "22:00": slots(7).Label = "22~00": slots(7).IsDay = False: slots(7).IsSpecial = False: slots(7).WorkerCount = 0
+    ' 00~03 (Special)
+    slots(8).TimeStr = "00:00": slots(8).Label = "00~03": slots(8).IsDay = False: slots(8).IsSpecial = True: slots(8).SpecialId = "0003": slots(8).WorkerCount = 0
+    ' 03~06
+    slots(9).TimeStr = "03:00": slots(9).Label = "03~06": slots(9).IsDay = False: slots(9).IsSpecial = False: slots(9).WorkerCount = 0
+    ' 06~09
+    slots(10).TimeStr = "06:00": slots(10).Label = "06~09": slots(10).IsDay = False: slots(10).IsSpecial = False: slots(10).WorkerCount = 0
+End Sub
+
+' ── 휴가 일자 범위 검사 (Private 선언) ──
+Private Function IsDateInPeriod(target As Date, baseVal As Date, periodVal As String) As Boolean
+    Dim targetStr As String, baseStr As String
+    targetStr = Format(target, "yyyy-mm-dd")
+    baseStr = Format(baseVal, "yyyy-mm-dd")
+    
+    If Trim(periodVal) = "" Then
+        IsDateInPeriod = (targetStr = baseStr)
+        Exit Function
+    End If
+    
+    ' YYYY-MM-DD ~ YYYY-MM-DD 형태 파싱
+    Dim parts() As String
+    parts = Split(periodVal, "~")
+    
+    If UBound(parts) = 1 Then
+        Dim startStr As String, endStr As String
+        startStr = Trim(parts(0))
+        endStr = Trim(parts(1))
+        
+        If IsDate(startStr) And IsDate(endStr) Then
+            Dim startDate As Date, endDate As Date
+            startDate = DateValue(startStr)
+            endDate = DateValue(endStr)
+            IsDateInPeriod = (target >= startDate And target <= endDate)
+            Exit Function
+        End If
+    End If
+    
+    ' 단일 날짜 형태인 경우
+    If IsDate(periodVal) Then
+        IsDateInPeriod = (target = DateValue(periodVal))
+        Exit Function
+    End If
+    
+    ' 그 외 텍스트 등은 기본 등록 날짜와 같은지만 검사
+    IsDateInPeriod = (targetStr = baseStr)
+End Function
+
+' ── 근무자 계급 찾기 (Private 선언) ──
+Private Function FindWorkerRank(wsWorkers As Worksheet, name As String) As String
+    Dim lastRow As Long, i As Long
+    lastRow = wsWorkers.Cells(wsWorkers.Rows.Count, 1).End(xlUp).Row
+    For i = 2 To lastRow
+        If Trim(wsWorkers.Cells(i, 3).Value) = name Then
+            FindWorkerRank = Trim(wsWorkers.Cells(i, 2).Value)
+            Exit Function
+        End If
+    Next i
+    FindWorkerRank = ""
+End Function
+
+' ── 근무자 소속팀 찾기 (Private 선언) ──
+Private Function FindWorkerTeam(wsWorkers As Worksheet, name As String) As String
+    Dim lastRow As Long, i As Long
+    lastRow = wsWorkers.Cells(wsWorkers.Rows.Count, 1).End(xlUp).Row
+    For i = 2 To lastRow
+        If Trim(wsWorkers.Cells(i, 3).Value) = name Then
+            FindWorkerTeam = Trim(wsWorkers.Cells(i, 4).Value)
+            Exit Function
+        End If
+    Next i
+    FindWorkerTeam = ""
+End Function
+
+' ── 역사적 특수근무 카운트 조회 (Private 선언) ──
+Private Function GetHistoryCount(wsDetail As Worksheet, name As String, slotLabel As String) As Long
+    Dim lastRow As Long
+    lastRow = wsDetail.Cells(wsDetail.Rows.Count, 1).End(xlUp).Row
+    If lastRow < 2 Then
+        GetHistoryCount = 0
+        Exit Function
+    End If
+    
+    GetHistoryCount = Application.WorksheetFunction.CountIfs( _
+        wsDetail.Range("C2:C" & lastRow), name, _
+        wsDetail.Range("B2:B" & lastRow), slotLabel)
+End Function
+
+' ── 마지막 가상 배정 기준자 찾기 (Private 선언) ──
+Private Function GetLastVirtualBaseNameForTeam(wsSummary As Worksheet, team As String) As String
+    Dim lastRow As Long, i As Long
+    lastRow = wsSummary.Cells(wsSummary.Rows.Count, 1).End(xlUp).Row
+    If lastRow < 2 Then
+        GetLastVirtualBaseNameForTeam = ""
+        Exit Function
+    End If
+    
+    ' 뒤에서부터 순회하며 해당 팀의 마지막 다음기준자를 검색
+    For i = lastRow To 2 Step -1
+        If Trim(wsSummary.Cells(i, 2).Value) = team Then
+            GetLastVirtualBaseNameForTeam = Trim(wsSummary.Cells(i, 3).Value)
+            Exit Function
+        End If
+    Next i
+    GetLastVirtualBaseNameForTeam = ""
+End Function
+
+' ── 특수근무 우선배정 후보 정렬 (Private 선언) ──
+Private Sub SortAvailableCandidates(ByRef candidates() As WorkerInfo, ByRef indices() As Long, specialId As String)
+    Dim i As Long, j As Long, temp As Long
+    Dim n As Long: n = UBound(indices)
+    
+    If n <= 1 Then Exit Sub
+    
+    For i = 1 To n - 1
+        For j = i + 1 To n
+            Dim idxA As Long: idxA = indices(i)
+            Dim idxB As Long: idxB = indices(j)
+            
+            Dim valA As Long, valB As Long
+            If specialId = "1214" Then
+                valA = candidates(idxA).Count1214
+                valB = candidates(idxB).Count1214
+            Else
+                valA = candidates(idxA).Count0003
+                valB = candidates(idxB).Count0003
+            End If
+            
+            Dim swap As Boolean: swap = False
+            If valA > valB Then
+                swap = True
+            ElseIf valA = valB Then
+                ' 횟수가 같으면 가입순서(Seq) 오름차순
+                If candidates(idxA).Seq > candidates(idxB).Seq Then
+                    swap = True
+                End If
+            End If
+            
+            If swap Then
+                temp = indices(i)
+                indices(i) = indices(j)
+                indices(j) = temp
+            End If
+        Next j
+    Next i
+End Sub
+
+' ── 시트 가져오기 또는 생성하기 (Private 선언) ──
+Private Function GetOrCreateSheet(sheetName As String) As Worksheet
+    Dim ws As Worksheet
+    On Error Resume Next
+    Set ws = ThisWorkbook.Sheets(sheetName)
+    On Error GoTo 0
+    
+    If ws Is Nothing Then
+        Set ws = ThisWorkbook.Sheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
+        ws.Name = sheetName
+        ' 헤더 설정
+        If sheetName = "생성기록_요약" Then
+            ws.Range("A1:H1").Value = Array("날짜", "당번팀", "다음기준자", "총원", "사고자", "당번", "비번", "QR데이터")
+        ElseIf sheetName = "생성기록_상세" Then
+            ws.Range("A1:G1").Value = Array("날짜", "시간대", "이름", "계급", "소속", "말뚝여부", "비고")
+        End If
+        ws.Range("A1").Parent.Rows(1).Font.Bold = True
+        ws.Columns.AutoFit
+    End If
+    Set GetOrCreateSheet = ws
+End Function
+
+' ── QR용 텍스트 데이터 압축 (Private 선언) ──
+Private Function BuildCompressedQrData(dt As String, team As String, tot As Long, vac As Long, onD As Long, offD As Long, vacCount As Long, ByRef vacations() As VacationInfo, ByRef slots() As TimeSlotInfo) As String
+    Dim res As String
+    res = dt & "|" & team & "|" & tot & "," & vac & "," & onD & "," & offD & "|"
+    
+    ' 사고자 목록 압축 (김휴직,소방장,휴가,2026-07-02,개인사정;...)
+    Dim i As Long
+    Dim vacStr As String: vacStr = ""
+    If vacCount >= 1 Then
+        For i = 1 To vacCount
+            Dim v As VacationInfo: v = vacations(i)
+            Dim vItem As String
+            vItem = v.Name & "," & v.Rank & "," & v.VacType & "," & v.Period & "," & v.Comment
+            If vacStr = "" Then vacStr = vItem Else vacStr = vacStr & ";" & vItem
+        Next i
+    End If
+    res = res & vacStr & "|"
+    
+    ' 근무표 압축 (시간대:이름.계급.소속.말뚝(1/0).비고,이름...;...)
+    Dim slotStr As String: slotStr = ""
+    Dim s As Long
+    For s = 1 To 10
+        Dim slotItem As String
+        slotItem = slots(s).Label & ":"
+        Dim wStr As String: wStr = ""
+        Dim w As Long
+        For w = 1 To slots(s).WorkerCount
+            Dim worker As AssignedWorker: worker = slots(s).Workers(w)
+            Dim pinVal As String: pinVal = IIf(worker.IsPinned, "1", "0")
+            Dim wItem As String
+            wItem = worker.Name & "." & worker.Rank & "." & worker.Team & "." & pinVal & "." & worker.Comment
+            If wStr = "" Then wStr = wItem Else wStr = wStr & "," & wItem
+        Next w
+        slotItem = slotItem & wStr
+        If slotStr = "" Then slotStr = slotItem Else slotStr = slotStr & ";" & slotItem
+    Next s
+    res = res & slotStr
+    
+    BuildCompressedQrData = res
+End Function
+
+' ── 히스토리 저장 (Private 선언) ──
+Private Sub WriteHistory(wsSummary As Worksheet, wsDetail As Worksheet, dt As String, team As String, nextBase As String, tot As Long, vac As Long, onD As Long, offD As Long, qrD As String, ByRef slots() As TimeSlotInfo)
+    ' 1. 요약 기록 작성
+    Dim lastRowSum As Long
+    lastRowSum = wsSummary.Cells(wsSummary.Rows.Count, 1).End(xlUp).Row + 1
+    
+    wsSummary.Cells(lastRowSum, 1).Value = dt
+    wsSummary.Cells(lastRowSum, 2).Value = team
+    wsSummary.Cells(lastRowSum, 3).Value = nextBase
+    wsSummary.Cells(lastRowSum, 4).Value = tot
+    wsSummary.Cells(lastRowSum, 5).Value = vac
+    wsSummary.Cells(lastRowSum, 6).Value = onD
+    wsSummary.Cells(lastRowSum, 7).Value = offD
+    wsSummary.Cells(lastRowSum, 8).Value = qrD
+    
+    ' 2. 상세 내역 작성 (중복 날짜 있으면 이전 이력 삭제 후 새로 추가)
+    Dim lastRowDet As Long, i As Long
+    lastRowDet = wsDetail.Cells(wsDetail.Rows.Count, 1).End(xlUp).Row
+    
+    If lastRowDet >= 2 Then
+        For i = lastRowDet To 2 Step -1
+            If wsDetail.Cells(i, 1).Value = dt Then
+                wsDetail.Rows(i).Delete
+            End If
+        Next i
+    End If
+    
+    Dim s As Long, w As Long
+    For s = 1 To 10
+        For w = 1 To slots(s).WorkerCount
+            lastRowDet = wsDetail.Cells(wsDetail.Rows.Count, 1).End(xlUp).Row + 1
+            wsDetail.Cells(lastRowDet, 1).Value = dt
+            wsDetail.Cells(lastRowDet, 2).Value = slots(s).Label
+            wsDetail.Cells(lastRowDet, 3).Value = slots(s).Workers(w).Name
+            wsDetail.Cells(lastRowDet, 4).Value = slots(s).Workers(w).Rank
+            wsDetail.Cells(lastRowDet, 5).Value = slots(s).Workers(w).Team
+            wsDetail.Cells(lastRowDet, 6).Value = IIf(slots(s).Workers(w).IsPinned, "Y", "N")
+            wsDetail.Cells(lastRowDet, 7).Value = slots(s).Workers(w).Comment
+        Next w
+    Next s
+End Sub
+
+' ── 근무표 조회 시트 렌더링 및 QR 생성 (Private 선언) ──
+Private Sub RenderViewerSheet(ws As Worksheet, dt As String, team As String, tot As Long, vac As Long, onD As Long, offD As Long, ByRef vacations() As VacationInfo, ByRef slots() As TimeSlotInfo, qrData As String)
+    ' 1. 시트 초기화
+    ws.Cells.Clear
+    ws.Cells.Font.Name = "맑은 고딕"
+    
+    ' 격자선 표시 유지
+    ActiveWindow.DisplayGridlines = True
+    
+    ' 2. 타이틀 영역
+    ws.Range("B2:D2").Merge
+    ws.Range("B2").Value = "📋 신평119안전센터 소내근무표"
+    ws.Range("B2").Font.Size = 16
+    ws.Range("B2").Font.Bold = True
+    ws.Range("B2").HorizontalAlignment = xlCenter
+    ws.Range("B2").VerticalAlignment = xlCenter
+    ws.Rows(2).RowHeight = 40
+    
+    ' 3. 서브타이틀 (날짜 및 당번팀)
+    ws.Range("B3:D3").Merge
+    ws.Range("B3").Value = dt & " (" & WeekdayName(Weekday(DateValue(dt)), True) & ") - " & team & " 당번"
+    ws.Range("B3").Font.Size = 11
+    ws.Range("B3").Font.Color = RGB(100, 110, 120)
+    ws.Range("B3").HorizontalAlignment = xlCenter
+    ws.Rows(3).RowHeight = 22
+    
+    ' 4. 통계 그리드
+    ws.Range("B5").Value = "총원"
+    ws.Range("B6").Value = tot & "명"
+    ws.Range("C5").Value = "사고자"
+    ws.Range("C6").Value = vac & "명"
+    ws.Range("D5").Value = "당번"
+    ws.Range("D6").Value = onD & "명"
+    ws.Range("E5").Value = "비번"
+    ws.Range("E6").Value = offD & "명"
+    
+    ws.Range("B5:E6").BorderAround xlContinuous, xlThin
+    ws.Range("B5:E6").Borders(xlInsideHorizontal).LineStyle = xlContinuous
+    ws.Range("B5:E6").Borders(xlInsideHorizontal).Weight = xlThin
+    ws.Range("B5:E6").Borders(xlInsideVertical).LineStyle = xlContinuous
+    ws.Range("B5:E6").Borders(xlInsideVertical).Weight = xlThin
+    ws.Range("B5:E5").Interior.Color = RGB(240, 244, 248)
+    ws.Range("B5:E5").Font.Bold = True
+    ws.Range("B5:E6").HorizontalAlignment = xlCenter
+    ws.Range("B5:E6").VerticalAlignment = xlCenter
+    
+    ' 5. 사고자 현황 영역
+    Dim startRowVac As Long: startRowVac = 8
+    ws.Range("B" & startRowVac).Value = "🚫 사고자 현황 (" & vac & "명)"
+    ws.Range("B" & startRowVac).Font.Bold = True
+    
+    Dim currRow As Long: currRow = startRowVac + 1
+    If vac = 0 Then
+        ws.Range("B" & currRow & ":E" & currRow).Merge
+        ws.Range("B" & currRow).Value = "사고자가 없습니다."
+        ws.Range("B" & currRow).Font.Color = RGB(150, 150, 150)
+        currRow = currRow + 1
+    Else
+        Dim v As Long
+        For v = 1 To vac
+            Dim vInfo As String
+            vInfo = vacations(v).Rank & " " & vacations(v).Name & " (" & vacations(v).VacType
+            If vacations(v).Period <> "" And vacations(v).Period <> dt Then
+                vInfo = vInfo & " | " & vacations(v).Period
+            End If
+            If vacations(v).Comment <> "" Then
+                vInfo = vInfo & " - " & vacations(v).Comment
+            End If
+            vInfo = vInfo & ")"
+            
+            ws.Range("B" & currRow & ":E" & currRow).Merge
+            ws.Range("B" & currRow).Value = vInfo
+            currRow = currRow + 1
+        Next v
+    End If
+    
+    ' 6. 근무표 테이블 영역
+    Dim startRowTbl As Long: startRowTbl = currRow + 1
+    ws.Range("B" & startRowTbl).Value = "시간대"
+    ws.Range("C" & startRowTbl & ":E" & startRowTbl).Merge
+    ws.Range("C" & startRowTbl).Value = "근무자"
+    ws.Range("B" & startRowTbl & ":E" & startRowTbl).Font.Bold = True
+    ws.Range("B" & startRowTbl & ":E" & startRowTbl).Interior.Color = RGB(74, 134, 200)
+    ws.Range("B" & startRowTbl & ":E" & startRowTbl).Font.Color = RGB(255, 255, 255)
+    ws.Range("B" & startRowTbl & ":E" & startRowTbl).HorizontalAlignment = xlCenter
+    
+    Dim s As Long
+    For s = 1 To 10
+        currRow = startRowTbl + s
+        
+        ' 시간 라벨
+        ws.Range("B" & currRow).Value = slots(s).Label
+        ws.Range("B" & currRow).HorizontalAlignment = xlCenter
+        
+        ' 근무자 목록
+        ws.Range("C" & currRow & ":E" & currRow).Merge
+        Dim wStr As String: wStr = ""
+        Dim w As Long
+        For w = 1 To slots(s).WorkerCount
+            Dim worker As AssignedWorker: worker = slots(s).Workers(w)
+            Dim item As String
+            item = IIf(worker.Rank <> "", worker.Rank & " ", "") & worker.Name & " (" & worker.Team & ")"
+            If worker.IsPinned Then
+                item = "📌 " & item
+                If worker.Comment <> "" Then item = item & " [" & worker.Comment & "]"
+            End If
+            If wStr = "" Then wStr = item Else wStr = wStr & ", " & item
+        Next w
+        ws.Range("C" & currRow).Value = wStr
+        
+        ' 12~14시, 00~03시 특수 강조 색 적용 (연한 주황색)
+        If slots(s).Label = "12~14" Or slots(s).Label = "00~03" Then
+            ws.Range("B" & currRow & ":E" & currRow).Interior.Color = RGB(255, 240, 215)
+            ws.Range("B" & currRow & ":E" & currRow).Font.Bold = True
+        End If
+        
+        ws.Rows(currRow).RowHeight = 24
+    Next s
+    
+    ' 테두리 적용
+    Dim tblRange As Range
+    Set tblRange = ws.Range("B" & startRowTbl & ":E" & (startRowTbl + 10))
+    tblRange.Borders.LineStyle = xlContinuous
+    tblRange.Borders.Weight = xlThin
+    tblRange.HorizontalAlignment = xlCenter
+    tblRange.VerticalAlignment = xlCenter
+    
+    ' 열 너비 자동 맞춤
+    ws.Columns("B").ColumnWidth = 14
+    ws.Columns("C").ColumnWidth = 14
+    ws.Columns("D").ColumnWidth = 14
+    ws.Columns("E").ColumnWidth = 14
+    
+    ' 7. QR 코드 생성 및 이미지 로드
+    ' 최종 URL 빌드
+    Dim finalUrl As String
+    finalUrl = WEB_APP_URL & "?d=" & URLEncode(qrData)
+    
+    ' QR 코드 이미지 URL (api.qrserver.com 사용)
+    Dim qrImgUrl As String
+    qrImgUrl = "https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=" & URLEncode(finalUrl)
+    
+    ' 기존 QR 이미지 삭제
+    Dim shp As Shape
+    For Each shp In ws.Shapes
+        If shp.Name = "ViewerQRCode" Then
+            shp.Delete
+        End If
+    Next shp
+    
+    ' 이미지 다운로드 및 배치
+    Dim pic As Object
+    On Error Resume Next
+    Set pic = ws.Pictures.Insert(qrImgUrl)
+    On Error GoTo 0
+    
+    If Not pic Is Nothing Then
+        pic.Name = "ViewerQRCode"
+        pic.Left = ws.Range("G5").Left
+        pic.Top = ws.Range("G5").Top
+        pic.Width = 160
+        pic.Height = 160
+        
+        ws.Range("G3").Value = "📱 스마트폰 조회용 QR코드"
+        ws.Range("G3").Font.Bold = True
+        ws.Range("G3").Font.Size = 9
+    Else
+        ' 백업 QR API 시도 (quickchart.io)
+        Dim backupQrUrl As String
+        backupQrUrl = "https://quickchart.io/qr?size=180&text=" & URLEncode(finalUrl)
+        On Error Resume Next
+        Set pic = ws.Pictures.Insert(backupQrUrl)
+        On Error GoTo 0
+        
+        If Not pic Is Nothing Then
+            pic.Name = "ViewerQRCode"
+            pic.Left = ws.Range("G5").Left
+            pic.Top = ws.Range("G5").Top
+            pic.Width = 160
+            pic.Height = 160
+            ws.Range("G3").Value = "📱 스마트폰 조회용 QR코드"
+            ws.Range("G3").Font.Bold = True
+        Else
+            ws.Range("G5").Value = "QR코드 로드 실패 (네트워크를 확인하세요)"
+            ws.Range("G5").Font.Color = RGB(220, 50, 50)
+            ws.Range("G5").Font.Bold = True
+        End If
+    End If
+End Sub
+
+' ── URL Encode 함수 (Private 선언) ──
+Private Function URLEncode(ByVal Text As String) As String
+    Dim Stream As Object
+    Set Stream = CreateObject("ADODB.Stream")
+    Stream.Type = 2 ' adTypeText
+    Stream.Charset = "utf-8"
+    Stream.Open
+    Stream.WriteText Text
+    Stream.Position = 0
+    Stream.Type = 1 ' adTypeBinary
+    
+    Dim Bytes() As Byte
+    Bytes = Stream.Read
+    Stream.Close
+    
+    Dim i As Long
+    Dim result As String
+    Dim b As Byte
+    For i = 0 To UBound(Bytes)
+        b = Bytes(i)
+        Select Case b
+            Case 97 To 122, 65 To 90, 48 To 57, 45, 46, 95, 126 ' a-z, A-Z, 0-9, -, ., _, ~
+                result = result & Chr(b)
+            Case 32
+                result = result & "%20"
+            Case Else
+                If b < 16 Then
+                    result = result & "%0" & Hex(b)
+                Else
+                    result = result & "%" & Hex(b)
+                End If
+        End Select
+    Next i
+    URLEncode = result
+End Function
