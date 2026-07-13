@@ -33,6 +33,12 @@
   <script>
     // 날짜 기본값을 오늘로 설정
     window.onload = function() {
+      // Vercel 환경에서 ?mode=admin으로 들어왔다면 즉시 admin.html로 리다이렉트
+      if (window.location.search.indexOf('mode=admin') !== -1) {
+        window.location.href = window.location.origin + '/admin.html';
+        return;
+      }
+
       var today = new Date();
       var yyyy = today.getFullYear();
       var mm = String(today.getMonth() + 1).padStart(2, '0');
