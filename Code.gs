@@ -879,7 +879,7 @@ function doGet(e) {
           html += '<p><i>Empty sheet</i></p>';
         }
         
-        var rules = sh.getDataValidations();
+        var rules = (lastRow > 0 && lastCol > 0) ? sh.getRange(1, 1, lastRow, lastCol).getDataValidations() : [];
         var ruleList = [];
         for (var r = 0; r < rules.length; r++) {
           for (var c = 0; c < rules[r].length; c++) {
