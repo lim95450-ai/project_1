@@ -1070,71 +1070,76 @@ function doGet(e) {
 }
 
 function getScheduleBySid(sid) {
-  var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  var sheet = ss.getSheetByName(SHEET_NAMES.RESULTS);
-  if (!sheet || sheet.getLastRow() < 2) return null;
+  try {
+    var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+    var sheet = ss.getSheetByName(SHEET_NAMES.RESULTS);
+    if (!sheet || sheet.getLastRow() < 2) return null;
 
-  var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 6).getValues();
-  for (var i = 0; i < data.length; i++) {
-    if (String(data[i][0]).trim() === sid) {
-      try {
-        var parsed = JSON.parse(data[i][5]);
-        parsed.createdAt = String(data[i][1]);
-        
-        // 구글 스프레드시트의 최신 정보(총원, 계급, 소속팀, 휴가 현황)를 실시간 반영
-        var allWorkers = _readWorkers(ss);
-        var vacationList = _readVacationList(ss, parsed.date);
-        var activeTeam = _getTeamOnDuty(parsed.date);
-        
-        var totalCount = allWorkers.length;
-        var vacationCount = vacationList.length;
-        
-        if (parsed.schedule) {
-          for (var s = 0; s < parsed.schedule.length; s++) {
-            var slot = parsed.schedule[s];
-            if (slot.workers) {
-              for (var w = 0; w < slot.workers.length; w++) {
-                var wName = slot.workers[w].name;
-                
-                // 근무자의 직급 및 소속팀을 시트의 최신 정보로 동적 갱신
-                slot.workers[w].rank = _findWorkerRank(allWorkers, wName);
-                slot.workers[w].team = _findWorkerTeam(allWorkers, wName);
+    var data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 6).getValues();
+    for (var i = 0; i < data.length; i++) {
+      if (String(data[i][0]).trim() === sid) {
+        try {
+          var parsed = JSON.parse(data[i][5]);
+          parsed.createdAt = String(data[i][1]);
+          
+          // 구글 스프레드시트의 최신 정보(총원, 계급, 소속팀, 휴가 현황)를 실시간 반영
+          var allWorkers = _readWorkers(ss);
+          var vacationList = _readVacationList(ss, parsed.date);
+          var activeTeam = _getTeamOnDuty(parsed.date);
+          
+          var totalCount = allWorkers.length;
+          var vacationCount = vacationList.length;
+          
+          if (parsed.schedule) {
+            for (var s = 0; s < parsed.schedule.length; s++) {
+              var slot = parsed.schedule[s];
+              if (slot.workers) {
+                for (var w = 0; w < slot.workers.length; w++) {
+                  var wName = slot.workers[w].name;
+                  
+                  // 근무자의 직급 및 소속팀을 시트의 최신 정보로 동적 갱신
+                  slot.workers[w].rank = _findWorkerRank(allWorkers, wName);
+                  slot.workers[w].team = _findWorkerTeam(allWorkers, wName);
+                }
               }
             }
           }
-        }
-        
-        // 당번팀 소속 근무자 중 오늘 휴가(사고)가 아닌 전체 인원을 당번 수에 집계
-        var onDutyCount = 0;
-        for (var w = 0; w < allWorkers.length; w++) {
-          var worker = allWorkers[w];
-          if (worker.team === activeTeam) {
-            var isOnVacation = false;
-            for (var v = 0; v < vacationList.length; v++) {
-              if (vacationList[v].name === worker.name) {
-                isOnVacation = true; break;
+          
+          // 당번팀 소속 근무자 중 오늘 휴가(사고)가 아닌 전체 인원을 당번 수에 집계
+          var onDutyCount = 0;
+          for (var w = 0; w < allWorkers.length; w++) {
+            var worker = allWorkers[w];
+            if (worker.team === activeTeam) {
+              var isOnVacation = false;
+              for (var v = 0; v < vacationList.length; v++) {
+                if (vacationList[v].name === worker.name) {
+                  isOnVacation = true; break;
+                }
+              }
+              if (!isOnVacation) {
+                onDutyCount++;
               }
             }
-            if (!isOnVacation) {
-              onDutyCount++;
-            }
           }
+          var offDutyCount = totalCount - vacationCount - onDutyCount;
+          
+          parsed.statsSummary = {
+            totalCount: totalCount,
+            vacationCount: vacationCount,
+            onDutyCount: onDutyCount,
+            offDutyCount: offDutyCount
+          };
+          
+          return parsed;
+        } catch (e) {
+          Logger.log('⚠️ JSON 파싱 오류 (sid: ' + sid + '): ' + e.message);
+          return null;
         }
-        var offDutyCount = totalCount - vacationCount - onDutyCount;
-        
-        parsed.statsSummary = {
-          totalCount: totalCount,
-          vacationCount: vacationCount,
-          onDutyCount: onDutyCount,
-          offDutyCount: offDutyCount
-        };
-        
-        return parsed;
-      } catch (e) {
-        Logger.log('⚠️ JSON 파싱 오류 (sid: ' + sid + '): ' + e.message);
-        return null;
       }
     }
+  } catch (globalErr) {
+    Logger.log('⚠️ getScheduleBySid 치명적 오류: ' + globalErr.message);
+    return { error: globalErr.message };
   }
   return null;
 }
