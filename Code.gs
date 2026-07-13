@@ -830,8 +830,9 @@ function doGet(e) {
 
   // ── 외부 API 요청 처리 (CORS 대응 JSON 반환) ─────────────────
   if (params.action) {
-    var responseData = null;
+    var responseOutput = '';
     try {
+      var responseData = null;
       if (params.action === 'getLatestSidByDate') {
         responseData = getLatestSidByDate(params.date);
       } else if (params.action === 'getScheduleBySid') {
@@ -845,10 +846,11 @@ function doGet(e) {
       } else {
         responseData = { error: 'Unknown action: ' + params.action };
       }
+      responseOutput = JSON.stringify(responseData);
     } catch (err) {
-      responseData = { error: err.message };
+      responseOutput = JSON.stringify({ error: err.message });
     }
-    return ContentService.createTextOutput(JSON.stringify(responseData))
+    return ContentService.createTextOutput(responseOutput)
       .setMimeType(ContentService.MimeType.JSON);
   }
   
