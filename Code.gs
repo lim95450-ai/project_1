@@ -857,7 +857,7 @@ function doGet(e) {
   if (params.mode === 'debug') {
     try {
       var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-      var html = '<h2>🔍 Spreadsheet Diagnostic Log</h2>';
+      var logText = '🔍 Spreadsheet Diagnostic Log\n============================\n\n';
       
       var sheets = ss.getSheets();
       for (var i = 0; i < sheets.length; i++) {
@@ -865,18 +865,18 @@ function doGet(e) {
         var name = sh.getName();
         var lastRow = sh.getLastRow();
         var lastCol = sh.getLastColumn();
-        html += '<h3>Sheet: ' + name + ' (Rows: ' + lastRow + ', Cols: ' + lastCol + ')</h3>';
+        logText += 'Sheet: ' + name + ' (Rows: ' + lastRow + ', Cols: ' + lastCol + ')\n';
         
         if (lastRow > 0 && lastCol > 0) {
           var headers = sh.getRange(1, 1, 1, lastCol).getValues()[0];
-          html += '<p><b>Headers:</b> ' + JSON.stringify(headers) + '</p>';
+          logText += 'Headers: ' + JSON.stringify(headers) + '\n';
           
           if (lastRow >= 2) {
             var sample = sh.getRange(2, 1, Math.min(5, lastRow - 1), lastCol).getValues();
-            html += '<p><b>Sample Data (up to 5 rows):</b><br><pre>' + JSON.stringify(sample, null, 2) + '</pre></p>';
+            logText += 'Sample Data (up to 5 rows):\n' + JSON.stringify(sample, null, 2) + '\n';
           }
         } else {
-          html += '<p><i>Empty sheet</i></p>';
+          logText += 'Empty sheet\n';
         }
         
         var rules = (lastRow > 0 && lastCol > 0) ? sh.getRange(1, 1, lastRow, lastCol).getDataValidations() : [];
@@ -887,24 +887,21 @@ function doGet(e) {
             if (rule) {
               ruleList.push({
                 cell: String.fromCharCode(65 + c) + (r + 1),
-                criteria: rule.getCriteriaType().toString(),
-                args: rule.getCriteriaValues(),
-                allowInvalid: rule.getAllowInvalid(),
-                helpText: rule.getHelpText()
+                criteria: rule.getCriteriaType().toString()
               });
             }
           }
         }
         if (ruleList.length > 0) {
-          html += '<p><b>Data Validation Rules (showing first 10):</b><br><pre>' + JSON.stringify(ruleList.slice(0, 10), null, 2) + '</pre></p>';
-        } else {
-          html += '<p><i>No data validation rules</i></p>';
+          logText += 'Data Validation Rules Count: ' + ruleList.length + '\n';
         }
-        html += '<hr>';
+        logText += '--------------------------------------------------\n\n';
       }
-      return HtmlService.createHtmlOutput(html);
+      return ContentService.createTextOutput(logText)
+        .setMimeType(ContentService.MimeType.TEXT);
     } catch (err) {
-      return HtmlService.createHtmlOutput('<h3>[디버그] 에러 발생</h3><pre>' + err.message + '</pre>');
+      return ContentService.createTextOutput('Error: ' + err.message)
+        .setMimeType(ContentService.MimeType.TEXT);
     }
   }
 
