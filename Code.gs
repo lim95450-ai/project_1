@@ -1228,16 +1228,49 @@ function getPinnedMapForView(dateStr) {
 
 function _normalizeDate(value) {
   if (value instanceof Date || (value && typeof value.getMonth === 'function')) {
-    return Utilities.formatDate(value, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    try {
+      return Utilities.formatDate(value, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+    } catch(err) {
+      return Utilities.formatDate(value, "GMT+09:00", 'yyyy-MM-dd');
+    }
   }
   var str = String(value).trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
     return str;
   }
+  
+  // 구글 표준 긴 날짜 형식 문자열 파싱 지원 (예: Wed Jun 24 2026 00:00:00 GMT+0900)
+  var parts = str.split(' ');
+  if (parts.length >= 4) {
+    var months = { Jan:'01', Feb:'02', Mar:'03', Apr:'04', May:'05', Jun:'06', Jul:'07', Aug:'08', Sep:'09', Oct:'10', Nov:'11', Dec:'12' };
+    var yyyy = '', mm = '', dd = '';
+    
+    // 포맷 1: Wed Jun 24 2026
+    if (months[parts[1]] && !isNaN(parts[2]) && !isNaN(parts[3])) {
+      yyyy = parts[3];
+      mm = months[parts[1]];
+      dd = String(parts[2]).padStart(2, '0');
+    }
+    // 포맷 2: 24 Jun 2026
+    else if (months[parts[2]] && !isNaN(parts[1]) && !isNaN(parts[3])) {
+      yyyy = parts[3];
+      mm = months[parts[2]];
+      dd = String(parts[1]).padStart(2, '0');
+    }
+    
+    if (yyyy && mm && dd) {
+      return yyyy + '-' + mm + '-' + dd;
+    }
+  }
+
   try {
     var d = new Date(str);
     if (!isNaN(d.getTime())) {
-      return Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+      try {
+        return Utilities.formatDate(d, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+      } catch(err) {
+        return Utilities.formatDate(d, "GMT+09:00", 'yyyy-MM-dd');
+      }
     }
   } catch (e) {}
   return str;
