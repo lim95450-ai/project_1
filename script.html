@@ -190,26 +190,26 @@
    */
   function callGasApi(action, params, successCallback, failureCallback) {
     if (window.GAS_WEBAPP_URL && window.GAS_WEBAPP_URL.trim() !== '') {
-      var url = window.GAS_WEBAPP_URL;
+      var url = window.GAS_WEBAPP_URL.trim();
       var isPost = ['setupSheets', 'seedSampleData', 'generateSchedule', 'updateWorkerRank'].indexOf(action) !== -1;
       
       var options = {
         method: isPost ? 'POST' : 'GET',
-        headers: {
-          'Content-Type': 'text/plain;charset=utf-8'
-        }
+        redirect: 'follow'
       };
 
-      var queryParams = '?action=' + encodeURIComponent(action);
-      
       if (isPost) {
+        options.headers = {
+          'Content-Type': 'text/plain;charset=utf-8'
+        };
         var payload = Object.assign({ action: action }, params);
         options.body = JSON.stringify(payload);
-      } else {
-        if (params) {
-          for (var key in params) {
-            queryParams += '&' + encodeURIComponent(key) + '=' + encodeURIComponent(params[key]);
-          }
+      }
+
+      var queryParams = '?action=' + encodeURIComponent(action);
+      if (!isPost && params) {
+        for (var key in params) {
+          queryParams += '&' + encodeURIComponent(key) + '=' + encodeURIComponent(params[key]);
         }
       }
 
