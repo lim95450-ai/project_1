@@ -1272,7 +1272,8 @@ function _normalizeTime(value) {
 // ── 3일 주기 당번 팀 계산 ──────────────────────────────────
 function _getTeamOnDuty(dateStr) {
   // dateStr is 'YYYY-MM-DD'
-  var parts = dateStr.split('-');
+  var normDate = _normalizeDate(dateStr);
+  var parts = normDate.split('-');
   var targetDate = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
   
   // 기준일: 2026-06-25일은 1팀 근무일
