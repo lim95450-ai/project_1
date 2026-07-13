@@ -1082,7 +1082,6 @@ function getScheduleBySid(sid) {
       if (String(data[i][0]).trim() === sid) {
         try {
           var parsed = JSON.parse(data[i][5]);
-          parsed.createdAt = String(data[i][1]);
           
           // 구글 스프레드시트의 최신 정보(총원, 계급, 소속팀, 휴가 현황)를 실시간 반영
           var allWorkers = _readWorkers(ss);
@@ -1091,21 +1090,6 @@ function getScheduleBySid(sid) {
           
           var totalCount = allWorkers.length;
           var vacationCount = vacationList.length;
-          
-          if (parsed.schedule) {
-            for (var s = 0; s < parsed.schedule.length; s++) {
-              var slot = parsed.schedule[s];
-              if (slot.workers) {
-                for (var w = 0; w < slot.workers.length; w++) {
-                  var wName = slot.workers[w].name;
-                  
-                  // 근무자의 직급 및 소속팀을 시트의 최신 정보로 동적 갱신
-                  slot.workers[w].rank = _findWorkerRank(allWorkers, wName);
-                  slot.workers[w].team = _findWorkerTeam(allWorkers, wName);
-                }
-              }
-            }
-          }
           
           // 당번팀 소속 근무자 중 오늘 휴가(사고)가 아닌 전체 인원을 당번 수에 집계
           var onDutyCount = 0;
@@ -1124,15 +1108,70 @@ function getScheduleBySid(sid) {
             }
           }
           var offDutyCount = totalCount - vacationCount - onDutyCount;
-          
-          parsed.statsSummary = {
-            totalCount: totalCount,
-            vacationCount: vacationCount,
-            onDutyCount: onDutyCount,
-            offDutyCount: offDutyCount
+
+          // 순수 안전 타입으로만 데이터 재가공 (직렬화 크래시 원천 방지)
+          var cleanedSchedule = [];
+          if (parsed.schedule) {
+            for (var s = 0; s < parsed.schedule.length; s++) {
+              var slot = parsed.schedule[s];
+              var cleanedWorkers = [];
+              if (slot.workers) {
+                for (var w = 0; w < slot.workers.length; w++) {
+                  if (slot.workers[w]) {
+                    cleanedWorkers.push({
+                      name: String(slot.workers[w].name || ''),
+                      rank: String(_findWorkerRank(allWorkers, slot.workers[w].name)),
+                      team: String(_findWorkerTeam(allWorkers, slot.workers[w].name)),
+                      isPinned: !!slot.workers[w].isPinned,
+                      comment: String(slot.workers[w].comment || '')
+                    });
+                  }
+                }
+              }
+              cleanedSchedule.push({
+                time: String(slot.time || slot.label || ''),
+                label: String(slot.label || slot.time || ''),
+                isDay: !!slot.isDay,
+                isSpecial: !!slot.isSpecial,
+                workers: cleanedWorkers
+              });
+            }
+          }
+
+          var cleanedVacations = [];
+          if (vacationList) {
+            for (var v = 0; v < vacationList.length; v++) {
+              var vac = vacationList[v];
+              if (vac) {
+                cleanedVacations.push({
+                  name: String(vac.name || ''),
+                  rank: String(vac.rank || _findWorkerRank(allWorkers, vac.name)),
+                  type: String(vac.type || ''),
+                  period: String(vac.period || ''),
+                  comment: String(vac.comment || '')
+                });
+              }
+            }
+          }
+
+          var cleanResult = {
+            sid: String(sid),
+            date: String(parsed.date || ''),
+            title: String(parsed.title || ''),
+            requiredPerSlot: parseInt(parsed.requiredPerSlot) || 1,
+            intervalMin: parseInt(parsed.intervalMin) || 60,
+            vacationList: cleanedVacations,
+            schedule: cleanedSchedule,
+            statsSummary: {
+              totalCount: parseInt(totalCount) || 0,
+              vacationCount: parseInt(vacationCount) || 0,
+              onDutyCount: parseInt(onDutyCount) || 0,
+              offDutyCount: parseInt(offDutyCount) || 0
+            },
+            isQrMode: !!parsed.isQrMode
           };
           
-          return parsed;
+          return cleanResult;
         } catch (e) {
           Logger.log('⚠️ JSON 파싱 오류 (sid: ' + sid + '): ' + e.message);
           return null;
